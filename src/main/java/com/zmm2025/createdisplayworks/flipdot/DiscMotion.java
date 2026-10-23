@@ -9,7 +9,7 @@ public final class DiscMotion {
     private double anchor;
     private float rpm;
     public DiscMotion() { Arrays.fill(angles, 180); }
-    public static double durationTicks(float rpm) { return rpm == 0 ? Double.POSITIVE_INFINITY : 81.92 / Math.abs(rpm); }
+    public static double durationTicks(float rpm) { return rpm == 0 ? Double.POSITIVE_INFINITY : 256.0 / Math.abs(rpm); }
     public float angle(int index, double time) {
         float end = (target & (1L << index)) == 0 ? 180 : 0;
         double distance = Math.max(0, time - anchor) * 180 / durationTicks(rpm);

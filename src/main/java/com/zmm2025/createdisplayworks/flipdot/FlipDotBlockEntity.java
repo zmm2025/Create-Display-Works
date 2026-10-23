@@ -160,12 +160,11 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         lastTick=now;
         if(assembly==null || assembly.controller()!=this)return;
-        float rpm=Float.MAX_VALUE;
+        float rpm=Float.MAX_VALUE;boolean powered=true;
         for(var tile:assembly.tiles()) {
             if(tile.isRemoved() || !level.hasChunkAt(tile.worldPosition) || level.getBlockEntity(tile.worldPosition)!=tile){assembly=null;return;}
-            rpm=Math.min(rpm,Math.abs(tile.getSpeed()));
+            rpm=Math.min(rpm,Math.abs(tile.getSpeed()));powered&=tile.isSpeedRequirementFulfilled();
         }
-        boolean powered=rpm>0;
         if(!powered) {wasPowered=false;playbackDelay=0;com.zmm2025.createdisplayworks.media.MediaLimits.release(this);return;}
         // If power returns before the old flip settles, finish it before advancing video.
         boolean settling=!wasPowered && assembly.tiles().stream().anyMatch(t->t.motion.moving(now)>0);
