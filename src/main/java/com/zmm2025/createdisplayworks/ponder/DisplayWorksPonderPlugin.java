@@ -42,7 +42,7 @@ public final class DisplayWorksPonderPlugin implements PonderPlugin {
         scene.overlay().showText(80).text("Each block has 8 by 8 dots. Place matching faces together to build one seamless canvas.")
             .pointAt(util.vector().of(3, 2, 3)).placeNearTarget().attachKeyFrame(); scene.idle(90);
         scene.world().showSection(util.select().fromTo(0, 1, 3, 0, 1, 4), Direction.EAST);
-        scene.world().setKineticSpeed(util.select().everywhere(), 16); text(scene, "IRON", 16);
+        scene.world().setKineticSpeed(util.select().everywhere(), 32); text(scene, "IRON", 32);
         scene.overlay().showText(80).text("Drive the built-in cogs from the side. Rotation passes between adjacent displays.")
             .pointAt(util.vector().centerOf(0, 1, 3)).placeNearTarget().attachKeyFrame(); scene.idle(90);
         scene.world().setKineticSpeed(util.select().everywhere(), 128); text(scene, "FULL", 128);

@@ -21,7 +21,6 @@ public final class CreateDisplayWorks
     private void setup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
             DisplayTarget.BY_BLOCK.register(ModContent.FLIP_DOT.get(), ModContent.TARGET.get());
-            com.simibubi.create.api.stress.BlockStressValues.IMPACTS.register(ModContent.FLIP_DOT.get(), () -> 1);
         });
     }
 }

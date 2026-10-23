@@ -44,6 +44,8 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
         return super.updateShape(state, direction, neighbor, level, pos, neighborPos);
     }
     @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(HORIZONTAL_FACING).getAxis(); }
+    // Matches Create's Display Board.
+    @Override public SpeedLevel getMinimumRequiredSpeedLevel() { return SpeedLevel.MEDIUM; }
     @Override public Class<FlipDotBlockEntity> getBlockEntityClass() { return FlipDotBlockEntity.class; }
     @Override public BlockEntityType<? extends FlipDotBlockEntity> getBlockEntityType() { return ModContent.FLIP_DOT_ENTITY.get(); }
     @Override public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {

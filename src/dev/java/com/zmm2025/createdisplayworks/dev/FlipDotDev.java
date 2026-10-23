@@ -42,7 +42,7 @@ public final class FlipDotDev {
         if(System.getProperty("flipdot.showcase", "").startsWith("media-ui"))return;
         if(System.getProperty("flipdot.showcase", "").equals("arrivals-capped")){verificationComplete=true;return;}
         if(Boolean.getBoolean("flipdot.verify") && event.getEntity() instanceof ServerPlayer player) {
-            build(player); started=world.getGameTime();stage=0;failures.clear();speed(16);text("32");
+            build(player); started=world.getGameTime();stage=0;failures.clear();speed(32);text("32");
         }
     }
     @SubscribeEvent public static void commands(RegisterCommandsEvent event) {
@@ -50,7 +50,7 @@ public final class FlipDotDev {
             .executes(c->{build(c.getSource().getPlayerOrException());return 1;})
             .then(Commands.literal("speed").then(Commands.argument("rpm",IntegerArgumentType.integer(-256,256)).executes(c->{speed(IntegerArgumentType.getInteger(c,"rpm"));return 1;})))
             .then(Commands.literal("text").then(Commands.argument("text",StringArgumentType.greedyString()).executes(c->{text(StringArgumentType.getString(c,"text"));return 1;})))
-            .then(Commands.literal("test").executes(c->{started=world.getGameTime();stage=0;failures.clear();speed(16);text("32");return 1;})));
+            .then(Commands.literal("test").executes(c->{started=world.getGameTime();stage=0;failures.clear();speed(32);text("32");return 1;})));
     }
     private static FlipDotBlockEntity tile(int x,int y) { return (FlipDotBlockEntity)world.getBlockEntity(origin.offset(x,y,0)); }
     private static void build(ServerPlayer player) {
@@ -68,7 +68,7 @@ public final class FlipDotDev {
         player.getInventory().setItem(3,new ItemStack(Items.WHITE_DYE,64));
         ItemStack name=new ItemStack(Items.NAME_TAG);name.set(DataComponents.CUSTOM_NAME,Component.literal("LIFE"));player.getInventory().setItem(4,name);
         player.getInventory().setItem(5,AllBlocks.DISPLAY_LINK.asStack());
-        text("LIFE");tile(0,0).setTextAtBlock("16RPM");
+        text("LIFE");tile(0,0).setTextAtBlock("32RPM");
     }
     private static void text(String text) { if(world!=null)tile(0,1).setTextAtBlock(text); }
     private static void speed(int rpm) {
@@ -84,17 +84,17 @@ public final class FlipDotDev {
         long elapsed=world.getGameTime()-started;
         if(stage==0 && elapsed>=80) {
             check(tile(0,1).assembly().tiles().size()==8,"8-block tiled canvas discovered");
-            check(Math.abs(tile(0,0).getSpeed())==16 && Math.abs(tile(3,1).getSpeed())==16,"real cog drive reaches all tiles at 16 RPM");
+            check(Math.abs(tile(0,0).getSpeed())==32 && Math.abs(tile(3,1).getSpeed())==32,"real cog drive reaches all tiles at 32 RPM");
             check(tile(3,1).displayedBits()!=0,"text spans the tiled canvas");
             text("64");stage++;
         } else if(stage==1 && elapsed>=82) {
             long start=tile(0,1).assembly().tiles().stream().mapToLong(FlipDotBlockEntity::flipStarted).max().orElseThrow();boolean synced=true;
             for(int x=0;x<4;x++)for(int y=0;y<2;y++)synced&=tile(x,y).flipStarted()<started+80 || tile(x,y).flipStarted()==start;
             check(synced,"all tiles share the same flip start tick");
-            check(tile(0,1).flipDuration()==6,"16 RPM flip has a 5.12-tick duration");speed(64);text("FAST");stage++;
+            check(tile(0,1).flipDuration()==8,"32 RPM flip has an 8-tick duration");speed(64);text("FAST");stage++;
         } else if(stage==2 && elapsed>=150) {
             check(Math.abs(tile(3,1).getSpeed())==64,"64 RPM propagates through the array");
-            check(tile(0,1).flipDuration()==2,"64 RPM flip has a 1.28-tick duration");
+            check(tile(0,1).flipDuration()==4,"64 RPM flip has a 4-tick duration");
             tile(0,1).setDye(DyeColor.BLACK);check(tile(0,1).discColor()==(DyeColor.BLACK.getTextureDiffuseColor()&0xFFFFFF),"dye matching the back swaps both faces");
             tile(0,1).setDye(DyeColor.WHITE);speed(0);stage++;
         } else if(stage==3 && elapsed>=180) { held=tile(3,1).displayedBits();text("STOP");stage++;
@@ -182,7 +182,7 @@ public final class FlipDotDev {
             tile(3,1).mediaControl("pause");held=tile(3,1).displayedBits();stage++;
         } else if(stage==11 && elapsed>=550) {
             check(tile(3,1).displayedBits()==held,"pause holds an imported frame while the cogs still turn");
-            speed(1);long[] frames=new long[16];Arrays.fill(frames,0,8,-1L);tile(3,1).installMedia(new com.zmm2025.createdisplayworks.media.MediaClip(4,2,frames));stage++;
+            speed(32);long[] frames=new long[16];Arrays.fill(frames,0,8,-1L);tile(3,1).installMedia(new com.zmm2025.createdisplayworks.media.MediaClip(4,2,frames));stage++;
         } else if(stage==12 && elapsed>=552) {
             speed(0);held=tile(3,1).displayedBits();stage++;
         } else if(stage==13 && elapsed>=650) {
