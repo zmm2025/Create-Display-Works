@@ -14,6 +14,7 @@ import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.StandardOpenOption
 import java.time.Duration
+import java.util.zip.ZipFile
 
 String devWorldName = 'Dev Testing World'
 String devControlPort = providers.gradleProperty('devControlPort').getOrElse('25595')
@@ -36,6 +37,23 @@ String devBranch = providers.exec {
     ignoreExitValue = true
 }.standardOutput.asText.get().trim()
 String devLabel = devBranch ? "${devBranch} (${projectDir.name})" : projectDir.name
+
+// Extra mods for the dev client (Jade, EMI, ...) come from a Modrinth App profile, so they can be managed there.
+// Set devModsProfile to a profile name or a path to any folder of mod jars.
+String devModsProfile = providers.gradleProperty('devModsProfile').getOrElse('Create Display Works Dev')
+File devModsSource = {
+    File direct = new File(devModsProfile)
+    if (direct.isAbsolute()) return direct
+    String home = System.getProperty('user.home')
+    String appData = providers.environmentVariable('APPDATA').getOrNull()
+    List<File> roots = [appData ? new File(appData, 'ModrinthApp') : null,
+                        new File(home, 'Library/Application Support/ModrinthApp'),
+                        new File(home, '.local/share/ModrinthApp')].findAll { it != null }
+    File root = roots.find { it.isDirectory() } ?: roots.first()
+    new File(root, "profiles/${devModsProfile}/mods")
+}()
+// Mods the Gradle classpath already loads. A second copy from the profile would stop the game with a duplicate-mod error.
+Set<String> devClasspathModIds = ['minecraft', 'neoforge', mod_id, 'create', 'ponder', 'flywheel'] as Set
 
 sourceSets {
     // Tiny -javaagent that hands the game an Instrumentation instance for redefining classes.
@@ -88,6 +106,61 @@ tasks.matching { it.name == 'runDevClient' }.configureEach {
         }
     }
     doFirst { DevClientLauncher.requireNoRunningClient(devRunDir, devControlPort) }
+    doFirst { DevMods.sync(devModsSource, new File(devRunDir, 'mods'), devClasspathModIds, it.logger) }
+}
+
+class DevMods {
+    /** Lists the jars this sync copied last time, so jars added to run/mods by hand are left alone. */
+    static final String MANIFEST = '.dev-mods-synced'
+
+    /** Mirrors the enabled jars of the Modrinth profile into the dev client's mods folder. */
+    static void sync(File source, File modsDir, Set<String> classpathModIds, Logger logger) {
+        modsDir.mkdirs()
+        File manifest = new File(modsDir, MANIFEST)
+        Set<String> previous = manifest.exists() ? manifest.readLines().findAll { it } as Set : [] as Set
+        Map<String, File> wanted = [:]
+        if (source.isDirectory()) {
+            // Modrinth disables a mod by renaming it to .jar.disabled, so only .jar files count.
+            source.listFiles().findAll { it.isFile() && it.name.endsWith('.jar') }.sort { it.name }.each { File jar ->
+                Set<String> ids = modIds(jar)
+                Set<String> clash = ids.intersect(classpathModIds)
+                if (clash) logger.lifecycle("Dev mods: skipping ${jar.name}; Gradle already provides ${clash.join(', ')}")
+                else wanted[jar.name] = jar
+            }
+        } else {
+            logger.lifecycle("Dev mods: no mods folder at ${source}; create the Modrinth profile or set devModsProfile")
+        }
+        (previous - wanted.keySet()).each { new File(modsDir, it).delete() }
+        wanted.each { String name, File jar ->
+            File target = new File(modsDir, name)
+            if (target.length() != jar.length() || target.lastModified() != jar.lastModified()) {
+                java.nio.file.Files.copy(jar.toPath(), target.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES)
+            }
+        }
+        manifest.text = wanted.keySet().join('\n')
+        if (wanted) logger.lifecycle("Dev mods: ${wanted.size()} from ${source}")
+    }
+
+    private static Set<String> modIds(File jar) {
+        try (ZipFile zip = new ZipFile(jar)) {
+            def entry = zip.getEntry('META-INF/neoforge.mods.toml') ?: zip.getEntry('META-INF/mods.toml')
+            if (entry == null) return [] as Set
+            String toml = zip.getInputStream(entry).getText('UTF-8')
+            // Only [[mods]] tables declare mods; [[dependencies.*]] tables also have modId keys.
+            Set<String> ids = [] as Set
+            boolean inMods = false
+            toml.eachLine { String line ->
+                String trimmed = line.trim()
+                if (trimmed.startsWith('[')) inMods = trimmed ==~ /\[\[\s*mods\s*]]/
+                def match = inMods ? trimmed =~ /^modId\s*=\s*["']([^"']+)["']/ : null
+                if (match) ids << match[0][1]
+            }
+            return ids
+        } catch (IOException ignored) {
+            return [] as Set
+        }
+    }
 }
 
 class DevClientLauncher {
