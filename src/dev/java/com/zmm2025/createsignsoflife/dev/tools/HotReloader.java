@@ -52,9 +52,10 @@ public final class HotReloader {
         Map<String, Long> resources = hashResources();
         Map<String, byte[]> changedClasses = new TreeMap<>();
         classes.forEach((name, bytes) -> { if(!Arrays.equals(bytes, loadedClasses.get(name))) changedClasses.put(name, bytes); });
-        Set<String> assets = new TreeSet<>(), data = new TreeSet<>();
-        resources.forEach((path, hash) -> {
-            if(hash.equals(loadedResources.get(path))) return;
+        Set<String> assets = new TreeSet<>(), data = new TreeSet<>(), resourcePaths = new HashSet<>(resources.keySet());
+        resourcePaths.addAll(loadedResources.keySet());
+        resourcePaths.forEach(path -> {
+            if(Objects.equals(resources.get(path), loadedResources.get(path))) return;
             if(path.startsWith("assets/")) assets.add(path);
             else if(path.startsWith("data/")) data.add(path);
             else if(path.startsWith("META-INF/")) pendingRestart.add(path + " changed; it is only read at startup");
@@ -87,6 +88,7 @@ public final class HotReloader {
             redefined.clear();
             pendingRestart.add("the JVM could not hot-swap " + definitions.size() + " class(es): " + e);
         }
+        loadedResources.clear();
         loadedResources.putAll(resources);
         return new Result(redefined, notYetLoaded, new Changes(changedClasses, assets, data), List.copyOf(new LinkedHashSet<>(pendingRestart)));
     }
@@ -134,17 +136,26 @@ public final class HotReloader {
 
     /**
      * javac numbers a class's lambda bodies in source order ({@code lambda$tick$3}), so adding or removing a lambda
-     * renumbers the ones after it. Editing inside a lambda keeps its name and is safe to swap; a lambda that vanished
-     * or whose body moved to another name is not.
+     * renumbers the ones after it. Editing inside existing lambdas keeps their names and is safe to swap, and so is
+     * appending lambdas after all existing ones. A removed lambda isn't, and neither is an added lambda alongside
+     * changed existing bodies, because an insertion that shifts names looks exactly like an append plus edits.
      */
     private static List<String> lambdaShifts(String name, byte[] before, byte[] after) {
         Map<String, String> old = lambdas(node(before)), now = lambdas(node(after));
-        Set<String> moved = new TreeSet<>();
-        old.forEach((lambda, body) -> {
-            if(!now.containsKey(lambda) || (!body.equals(now.get(lambda)) && now.containsValue(body))) moved.add(lambda);
-        });
-        if(moved.isEmpty()) return List.of();
+        Set<String> added = new TreeSet<>(now.keySet());
+        added.removeAll(old.keySet());
+        int lastOld = old.keySet().stream().mapToInt(HotReloader::lambdaIndex).max().orElse(-1);
+        boolean edited = old.entrySet().stream().anyMatch(e -> now.containsKey(e.getKey()) && !e.getValue().equals(now.get(e.getKey())));
+        boolean unsafe = !now.keySet().containsAll(old.keySet())
+            || !added.isEmpty() && (edited || added.stream().anyMatch(lambda -> lambdaIndex(lambda) <= lastOld));
+        if(!unsafe) return List.of();
         return List.of(name.substring(name.lastIndexOf('.') + 1) + " added or removed lambdas, which renumbers the ones after them, so it can't be hot-swapped safely");
+    }
+
+    /** The class-wide counter javac puts at the end of a lambda's name, e.g. 3 for {@code lambda$tick$3()V}. */
+    private static int lambdaIndex(String lambda) {
+        String name = lambda.substring(0, lambda.indexOf('('));
+        return Integer.parseInt(name.substring(name.lastIndexOf('$') + 1));
     }
 
     private static Map<String, String> lambdas(ClassNode node) {

@@ -75,9 +75,10 @@ It also reports edits that need a restart and exits non-zero (`DEV RELOAD: RESTA
 - added or removed `@SubscribeEvent` handlers
 - changed `@Mod`, `@EventBusSubscriber` or mixin classes
 - changed `META-INF` files
-- lambdas added to or removed from a class the game has already loaded. The compiler numbers lambdas in source order,
-  so this renumbers the ones after them, and swapping would leave running code calling the wrong or a missing lambda.
-  In this case it swaps nothing. Editing code inside an existing lambda still hot-swaps.
+- lambdas removed from a class the game has already loaded, inserted before its existing lambdas, or added alongside
+  edits to its existing lambdas. The compiler numbers lambdas in source order, so these renumber them, and swapping
+  would leave running code calling the wrong or a missing lambda. In this case it swaps nothing. Editing code inside
+  existing lambdas, or adding lambdas after all of them, still hot-swaps.
 
 Some restarts it can't detect, because the code still swaps but never runs again:
 
