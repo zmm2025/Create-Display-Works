@@ -1,4 +1,5 @@
 {
+  "itemGroup.create_signs_of_life": "Create: Signs of Life",
   "block.create_signs_of_life.flip_dot_display": "Flip-Dot Display",
   "display_target.create_signs_of_life.flip_dot_display": "Flip-Dot Display",
   "create_signs_of_life.ponder.flip_dot_drive.header": "Building and powering a Flip-Dot Display",
