@@ -1,0 +1,160 @@
+// Hot-reloading development client. See DEVELOPMENT.md for the workflow.
+//
+//   ./gradlew runDevClient   launches Minecraft (offline "Dev" player) straight into the shared test world
+//   ./gradlew devReload      compiles, then pushes code, assets and data into the running client
+//
+// The in-game side lives in src/dev/java/.../dev/tools; the class-redefinition agent lives in src/devAgent.
+
+import groovy.json.JsonSlurper
+
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.channels.FileChannel
+import java.nio.channels.OverlappingFileLockException
+import java.nio.file.StandardOpenOption
+import java.time.Duration
+
+String devWorldName = 'Dev Testing World'
+String devControlPort = providers.gradleProperty('devControlPort').getOrElse('25595')
+// JetBrains Runtime allows hot-swapping new methods, fields and classes; plain JDKs only allow edits to method bodies.
+boolean devUseJbr = providers.gradleProperty('devJbr').getOrElse('true').toBoolean()
+
+// Every worktree of this repository shares one game directory (and so one test world): the main checkout's run/.
+// Override with -PdevRunDir=<path> (or in ~/.gradle/gradle.properties).
+File devRunDir = providers.gradleProperty('devRunDir').map { new File(it) }.getOrElse({
+    String commonDir = providers.exec {
+        commandLine 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir'
+        ignoreExitValue = true
+    }.standardOutput.asText.get().trim()
+    File gitDir = commonDir ? new File(commonDir) : null
+    gitDir?.name == '.git' ? new File(gitDir.parentFile, 'run') : file('run')
+}())
+// Shown in the game's window title, so each client says which checkout it runs.
+String devBranch = providers.exec {
+    commandLine 'git', 'rev-parse', '--abbrev-ref', 'HEAD'
+    ignoreExitValue = true
+}.standardOutput.asText.get().trim()
+String devLabel = devBranch ? "${devBranch} (${projectDir.name})" : projectDir.name
+
+sourceSets {
+    // Tiny -javaagent that hands the game an Instrumentation instance for redefining classes.
+    create('devAgent')
+}
+
+def devAgentJar = tasks.register('devAgentJar', Jar) {
+    from sourceSets.devAgent.output
+    archiveFileName = 'dev-agent.jar'
+    destinationDirectory = layout.buildDirectory.dir('devAgent')
+    manifest.attributes(
+            'Premain-Class': 'com.zmm2025.createsignsoflife.devagent.DevAgent',
+            'Can-Redefine-Classes': 'true',
+            'Can-Retransform-Classes': 'true'
+    )
+}
+
+// Forward slashes: the run's argument file would otherwise double every Windows backslash.
+String devPath(File file) { file.absolutePath.replace('\\', '/') }
+String classRoots = (sourceSets.main.output.classesDirs.files + sourceSets.dev.output.classesDirs.files)
+        .collect { devPath(it) }.join(File.pathSeparator)
+String resourceRoots = [sourceSets.main.output.resourcesDir, sourceSets.dev.output.resourcesDir]
+        .collect { devPath(it) }.join(File.pathSeparator)
+
+neoForge.runs {
+    devClient {
+        client()
+        ideName = 'Dev Client (hot reload)'
+        gameDirectory = devRunDir
+        taskBefore devAgentJar
+        jvmArguments.add(devAgentJar.flatMap { it.archiveFile }.map { "-javaagent:${it.asFile.absolutePath}".toString() })
+        if (devUseJbr) jvmArgument '-XX:+AllowEnhancedClassRedefinition'
+        systemProperty 'csol.dev.tools', 'true'
+        systemProperty 'csol.dev.world', devWorldName
+        systemProperty 'csol.dev.controlPort', devControlPort
+        systemProperty 'csol.dev.worktree', devPath(projectDir)
+        systemProperty 'csol.dev.label', devLabel
+        systemProperty 'csol.dev.classRoots', classRoots
+        systemProperty 'csol.dev.resourceRoots', resourceRoots
+    }
+}
+
+tasks.matching { it.name == 'runDevClient' }.configureEach {
+    group = 'dev'
+    description = "Launches Minecraft into '${devWorldName}' with hot reload and the agent control API."
+    if (devUseJbr) {
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(21)
+            vendor = JvmVendorSpec.JETBRAINS
+        }
+    }
+    doFirst { DevClientLauncher.requireNoRunningClient(devRunDir, devControlPort) }
+}
+
+class DevClientLauncher {
+    /** Only one dev client runs at a time, because every worktree shares one game directory and test world. */
+    static void requireNoRunningClient(File runDir, String port) {
+        if (!lockHeld(new File(runDir, 'dev-client.lock'))) return
+        String owner = 'another worktree'
+        try {
+            String status = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status"))
+                    .timeout(Duration.ofSeconds(5)).build(), HttpResponse.BodyHandlers.ofString()).body()
+            owner = (new JsonSlurper().parseText(status) as Map).worktree ?: owner
+        } catch (Exception ignored) {
+            // Keep the generic description.
+        }
+        throw new GradleException("A dev client is already running from ${owner}. Close it before launching another.")
+    }
+
+    private static boolean lockHeld(File lock) {
+        if (!lock.exists()) return false
+        try (FileChannel channel = FileChannel.open(lock.toPath(), StandardOpenOption.WRITE)) {
+            def held = channel.tryLock()
+            if (held == null) return true
+            held.release()
+            return false
+        } catch (OverlappingFileLockException | IOException ignored) {
+            return true
+        }
+    }
+}
+
+abstract class DevReloadTask extends DefaultTask {
+    @Input abstract Property<String> getPort()
+    @Input abstract Property<String> getWorktree()
+    @Input abstract Property<Boolean> getFull()
+
+    DevReloadTask() {
+        outputs.upToDateWhen { false }
+    }
+
+    @TaskAction
+    void reload() {
+        String query = "worktree=${URLEncoder.encode(worktree.get(), 'UTF-8')}&full=${full.get()}"
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port.get()}/reload?${query}"))
+                .timeout(Duration.ofMinutes(3))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build()
+        HttpResponse<String> response
+        try {
+            response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
+                    .send(request, HttpResponse.BodyHandlers.ofString())
+        } catch (ConnectException ignored) {
+            logger.lifecycle('DEV RELOAD: NO SESSION - no dev client is running; start one with ./gradlew runDevClient')
+            return
+        }
+        Map result = new JsonSlurper().parseText(response.body()) as Map
+        (result.details as List)?.each { logger.lifecycle("  ${it}") }
+        String line = "DEV RELOAD: ${result.status.toString().toUpperCase().replace('-', ' ')} - ${result.message}"
+        if (result.status in ['reloaded', 'no-changes']) logger.lifecycle(line)
+        else throw new GradleException(line)
+    }
+}
+
+tasks.register('devReload', DevReloadTask) {
+    group = 'dev'
+    description = 'Compiles and hot-reloads code, assets and data into the running dev client. -Pfull reloads everything.'
+    dependsOn 'classes', 'devClasses'
+    port = devControlPort
+    worktree = projectDir.absolutePath
+    full = providers.gradleProperty('full').present
+}

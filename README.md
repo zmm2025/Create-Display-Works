@@ -28,3 +28,6 @@ All items are subject to change or removal without notice.
 
 ### Integrations & Compatibility 🔀
 - Create Aeronautics compatibility
+
+## 🧑‍💻 Development
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the hot-reloading dev client, the shared test world and the agent control API.
