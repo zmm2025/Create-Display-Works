@@ -1,3 +1,5 @@
+<img src="src/main/resources/icon.png" alt="Create: Display Works logo" width="128" align="right">
+
 # Create: Display Works
 Bring your Create factories to life with new and smarter display technology!
 
