@@ -114,7 +114,7 @@ Use `/command` to move and aim the player, for example
 
 ```sh
 curl -s localhost:25595/status
-curl -s -X POST localhost:25595/command --data "setblock ~2 ~ ~ create_signs_of_life:flip_dot_display"
+curl -s -X POST localhost:25595/command --data "setblock ~2 ~ ~ create_display_works:flip_dot_display"
 curl -s -X POST "localhost:25595/screenshot?hud=false"
 ```
 

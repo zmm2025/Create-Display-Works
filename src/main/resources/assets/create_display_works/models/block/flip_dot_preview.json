@@ -1,0 +1,6 @@
+{
+  "parent": "create_display_works:item/flip_dot_display",
+  "textures": {
+    "on": "create_display_works:block/disc_black"
+  }
+}
