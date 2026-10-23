@@ -1,6 +1,0 @@
-{
-  "parent": "create_signs_of_life:item/flip_dot_display",
-  "textures": {
-    "on": "create_signs_of_life:block/disc_black"
-  }
-}

@@ -31,7 +31,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: create-signs-of-life-${{ github.run_number }}
+          name: create-display-works-${{ github.run_number }}
           path: build/libs/*.jar
           if-no-files-found: error
           overwrite: true

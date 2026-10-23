@@ -44,7 +44,7 @@ repositories {
 }
 
 base {
-    archivesName = 'create-signs-of-life'
+    archivesName = 'create-display-works'
 }
 
 String licenseFileName = "LICENSE_${mod_id}"

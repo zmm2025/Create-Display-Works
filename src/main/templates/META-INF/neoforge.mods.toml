@@ -1,13 +1,13 @@
 modLoader="javafml"
 loaderVersion="${loader_version_range}"
 license="${mod_license}"
-issueTrackerURL="https://github.com/zmm2025/Create-Signs-of-Life/issues"
+issueTrackerURL="https://github.com/zmm2025/Create-Display-Works/issues"
 
 [[mods]]
 modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
-displayURL="https://github.com/zmm2025/Create-Signs-of-Life"
+displayURL="https://github.com/zmm2025/Create-Display-Works"
 authors="${mod_authors}"
 description='''${mod_description}'''
 

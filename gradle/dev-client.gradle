@@ -47,7 +47,7 @@ def devAgentJar = tasks.register('devAgentJar', Jar) {
     archiveFileName = 'dev-agent.jar'
     destinationDirectory = layout.buildDirectory.dir('devAgent')
     manifest.attributes(
-            'Premain-Class': 'com.zmm2025.createsignsoflife.devagent.DevAgent',
+            'Premain-Class': 'com.zmm2025.createdisplayworks.devagent.DevAgent',
             'Can-Redefine-Classes': 'true',
             'Can-Retransform-Classes': 'true'
     )

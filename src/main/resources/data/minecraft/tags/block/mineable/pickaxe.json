@@ -1,6 +1,6 @@
 {
   "replace": false,
   "values": [
-    "create_signs_of_life:flip_dot_display"
+    "create_display_works:flip_dot_display"
   ]
 }
