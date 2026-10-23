@@ -11,7 +11,6 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.*;
-import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 
 public final class ModContent {
     private static final String ID = CreateSignsOfLife.MOD_ID;
@@ -29,15 +28,15 @@ public final class ModContent {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FlipDotBlockEntity>> FLIP_DOT_ENTITY =
         ENTITIES.register("flip_dot_display", () -> BlockEntityType.Builder.of(FlipDotBlockEntity::new, FLIP_DOT.get()).build(null));
     public static final DeferredHolder<DisplayTarget, FlipDotDisplayTarget> TARGET = TARGETS.register("flip_dot_display", FlipDotDisplayTarget::new);
+    public static final DeferredRegister<CreativeModeTab> TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, ID);
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> TAB = TABS.register("main", () -> CreativeModeTab.builder()
+        .title(net.minecraft.network.chat.Component.translatable("itemGroup." + ID))
+        .icon(() -> new ItemStack(FLIP_DOT_ITEM.get()))
+        .withTabsBefore(com.simibubi.create.AllCreativeModeTabs.PALETTES_CREATIVE_TAB.getKey())
+        .displayItems((params, output) -> ITEMS.getEntries().forEach(item -> output.accept(item.get())))
+        .build());
 
     public static void register(IEventBus bus) {
-        SOUNDS.register(bus); BLOCKS.register(bus); ITEMS.register(bus); ENTITIES.register(bus); TARGETS.register(bus);
-        bus.addListener(ModContent::creativeTab);
-    }
-
-    private static void creativeTab(BuildCreativeModeTabContentsEvent event) {
-        if (event.getTabKey() == CreativeModeTabs.REDSTONE_BLOCKS) event.accept(FLIP_DOT_ITEM.get());
-        if (event.getTabKey().equals(com.simibubi.create.AllCreativeModeTabs.BASE_CREATIVE_TAB.getKey()))
-            event.insertAfter(com.simibubi.create.AllBlocks.DISPLAY_BOARD.asStack(), new ItemStack(FLIP_DOT_ITEM.get()), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS);
+        SOUNDS.register(bus); BLOCKS.register(bus); ITEMS.register(bus); ENTITIES.register(bus); TARGETS.register(bus); TABS.register(bus);
     }
 }
