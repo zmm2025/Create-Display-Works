@@ -29,7 +29,7 @@ public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEnti
         VertexConsumer vertices = buffers.getBuffer(RenderType.entityCutout(WHITE));
         for (int row = 0; row < 8; row++) for (int col = 0; col < 8; col++) {
             pose.pushPose();
-            pose.translate((15 - col * 2) / 16f, (15 - row * 2) / 16f, 4.05f / 16);
+            pose.translate((15 - col * 2) / 16f, (15 - row * 2) / 16f, 4.5f / 16);
             pose.mulPose(rotation.rotationAxis((float)Math.toRadians(be.angle(row * 8 + col, partial)), .70710677f, .70710677f, 0));
             for (float[][] plate : PLATES) for (int face = 0; face < 6; face++) {
                 float[] normal = NORMALS[face];

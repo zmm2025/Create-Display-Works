@@ -1,20 +1,536 @@
 {
-  "variants": {
-    "facing=north": {
-      "model": "create_display_works:block/flip_dot_display",
-      "y": 0
+  "multipart": [
+    {
+      "when": {
+        "facing": "north"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display",
+        "y": 0
+      }
     },
-    "facing=east": {
-      "model": "create_display_works:block/flip_dot_display",
-      "y": 90
+    {
+      "when": {
+        "facing": "north",
+        "left": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_left",
+        "y": 0
+      }
     },
-    "facing=south": {
-      "model": "create_display_works:block/flip_dot_display",
-      "y": 180
+    {
+      "when": {
+        "facing": "north",
+        "right": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_right",
+        "y": 0
+      }
     },
-    "facing=west": {
-      "model": "create_display_works:block/flip_dot_display",
-      "y": 270
+    {
+      "when": {
+        "facing": "north",
+        "up": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_up",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "down": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_down",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "east"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "left": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_left",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "right": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_right",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "up": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_up",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "down": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_down",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "south"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "left": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_left",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "right": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_right",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "up": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_up",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "down": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_down",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "west"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "left": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_left",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "right": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_right",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "up": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_up",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "down": "false"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_down",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_left",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_right",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "up": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "down": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "up": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_left",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "up": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_right",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "down": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_left",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "down": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_right",
+        "y": 0
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_left",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_right",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "up": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "down": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "up": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_left",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "up": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_right",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "down": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_left",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "down": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_right",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_left",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_right",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "up": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "down": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "up": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_left",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "up": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_right",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "down": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_left",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "down": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_right",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_left",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_right",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "up": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "down": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "up": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_left",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "up": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_up_right",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "down": "true",
+        "left": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_left",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "down": "true",
+        "right": "true"
+      },
+      "apply": {
+        "model": "create_display_works:block/flip_dot_display_posts_down_right",
+        "y": 270
+      }
     }
-  }
+  ]
 }

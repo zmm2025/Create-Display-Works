@@ -1,0 +1,105 @@
+{
+  "render_type": "minecraft:cutout_mipped",
+  "textures": {
+    "side": "create:block/flap_display_side",
+    "top": "create:block/flap_display_top",
+    "inside": "create:block/flap_display_inside",
+    "metal": "create:block/dark_metal_block",
+    "iron": "create:block/industrial_iron_block_top",
+    "particle": "create:block/flap_display_front"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        5.5
+      ],
+      "to": [
+        16,
+        16,
+        6
+      ],
+      "faces": {
+        "east": {
+          "uv": [
+            15.5,
+            0,
+            16,
+            16
+          ],
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        0,
+        0,
+        6
+      ],
+      "to": [
+        16,
+        16,
+        10
+      ],
+      "faces": {
+        "east": {
+          "uv": [
+            6,
+            0,
+            10,
+            16
+          ],
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        15.95,
+        0,
+        6
+      ],
+      "to": [
+        16,
+        16,
+        10
+      ],
+      "faces": {
+        "west": {
+          "uv": [
+            6,
+            0,
+            10,
+            16
+          ],
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        0,
+        0,
+        10
+      ],
+      "to": [
+        16,
+        16,
+        13
+      ],
+      "faces": {
+        "east": {
+          "uv": [
+            3,
+            0,
+            6,
+            16
+          ],
+          "texture": "#side"
+        }
+      }
+    }
+  ]
+}

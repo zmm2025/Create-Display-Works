@@ -48,6 +48,13 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         return FlipDotAssembly.find(level, worldPosition);
     }
+    @Override public void initialize() {
+        super.initialize();
+        // Displays saved before connected borders load with every border showing.
+        if (level == null || level.isClientSide) return;
+        BlockState connected = FlipDotBlock.connect(getBlockState(), level, worldPosition);
+        if (connected != getBlockState()) level.setBlock(worldPosition, connected, net.minecraft.world.level.block.Block.UPDATE_ALL);
+    }
     @Override public void lazyTick() {
         super.lazyTick();
         if (level == null || level.isClientSide) return;
