@@ -26,6 +26,14 @@ public final class DisplayWorksPonderPlugin implements PonderPlugin {
     private static CreateSceneBuilder base(SceneBuilder builder, SceneBuildingUtil util, String id, String title) {
         var scene = new CreateSceneBuilder(builder);
         scene.title(id, title); scene.configureBasePlate(0, 0, 6); scene.showBasePlate();
+        // The schematic predates connected borders, so join the 4x2 canvas before showing it.
+        for (int x = 1; x <= 4; x++) for (int y = 1; y <= 2; y++) {
+            BlockPos pos = new BlockPos(x, y, 3);
+            scene.world().modifyBlock(pos, state -> FlipDotBlock.connect(state, d -> {
+                BlockPos next = pos.relative(d);
+                return next.getZ() == 3 && next.getX() >= 1 && next.getX() <= 4 && next.getY() >= 1 && next.getY() <= 2;
+            }), false);
+        }
         scene.world().showSection(util.select().fromTo(1, 1, 3, 4, 2, 3), Direction.DOWN);
         scene.idle(15); return scene;
     }

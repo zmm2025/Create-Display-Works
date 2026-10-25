@@ -22,10 +22,15 @@ import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
 import net.createmod.catnip.placement.*;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.material.*;
 import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
 
 public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotBlockEntity>, ICogWheel, IWrenchable, SimpleWaterloggedBlock {
+    /** True when a display facing the same way continues the canvas on that side, which hides the border there. Left and right are as seen from the front. */
+    public static final BooleanProperty LEFT = BooleanProperty.create("left"), RIGHT = BooleanProperty.create("right"),
+        UP = BlockStateProperties.UP, DOWN = BlockStateProperties.DOWN;
     private static final int PLACEMENT = PlacementHelpers.register(new IPlacementHelper() {
         public java.util.function.Predicate<ItemStack> getItemPredicate() { return s -> s.is(ModContent.FLIP_DOT_ITEM.get()); }
         public java.util.function.Predicate<BlockState> getStatePredicate() { return s -> s.is(ModContent.FLIP_DOT.get()); }
@@ -36,12 +41,30 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
                 s -> s.setValue(HORIZONTAL_FACING, state.getValue(HORIZONTAL_FACING)));
         }
     });
-    public FlipDotBlock(Properties properties) { super(properties); registerDefaultState(defaultBlockState().setValue(WATERLOGGED, false)); }
-    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { super.createBlockStateDefinition(builder.add(WATERLOGGED)); }
+    public FlipDotBlock(Properties properties) { super(properties); registerDefaultState(defaultBlockState().setValue(WATERLOGGED, false)
+        .setValue(LEFT, false).setValue(RIGHT, false).setValue(UP, false).setValue(DOWN, false)); }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { super.createBlockStateDefinition(builder.add(WATERLOGGED, LEFT, RIGHT, UP, DOWN)); }
     @Override public FluidState getFluidState(BlockState state) { return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : super.getFluidState(state); }
     @Override public BlockState updateShape(BlockState state, Direction direction, BlockState neighbor, LevelAccessor level, BlockPos pos, BlockPos neighborPos) {
         if (state.getValue(WATERLOGGED)) level.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(level));
-        return super.updateShape(state, direction, neighbor, level, pos, neighborPos);
+        return connect(super.updateShape(state, direction, neighbor, level, pos, neighborPos), level, pos);
+    }
+    public static BlockState connect(BlockState state, java.util.function.Predicate<Direction> continues) {
+        Direction facing = state.getValue(HORIZONTAL_FACING);
+        return state.setValue(LEFT, continues.test(facing.getClockWise())).setValue(RIGHT, continues.test(facing.getCounterClockWise()))
+            .setValue(UP, continues.test(Direction.UP)).setValue(DOWN, continues.test(Direction.DOWN));
+    }
+    static BlockState connect(BlockState state, BlockGetter level, BlockPos pos) {
+        return connect(state, d -> {
+            BlockState neighbor = level.getBlockState(pos.relative(d));
+            return neighbor.getBlock() instanceof FlipDotBlock && neighbor.getValue(HORIZONTAL_FACING) == state.getValue(HORIZONTAL_FACING);
+        });
+    }
+    // Placement helpers and wrenching can set the state without asking for its shape, so check the borders once it lands.
+    @Override public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean moving) {
+        super.onPlace(state, level, pos, oldState, moving);
+        BlockState connected = connect(state, level, pos);
+        if (connected != state) level.setBlock(pos, connected, Block.UPDATE_ALL);
     }
     @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(HORIZONTAL_FACING).getAxis(); }
     // Matches Create's Display Board.
@@ -55,7 +78,8 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
         BlockState behind = context.getLevel().getBlockState(context.getClickedPos().relative(context.getClickedFace().getOpposite()));
         BlockState state = behind.is(this) && (context.getPlayer() == null || !context.getPlayer().isShiftKeyDown())
             ? defaultBlockState().setValue(HORIZONTAL_FACING, behind.getValue(HORIZONTAL_FACING)) : super.getStateForPlacement(context);
-        return state.setValue(WATERLOGGED, context.getLevel().getFluidState(context.getClickedPos()).getType() == Fluids.WATER);
+        return connect(state.setValue(WATERLOGGED, context.getLevel().getFluidState(context.getClickedPos()).getType() == Fluids.WATER),
+            context.getLevel(), context.getClickedPos());
     }
     @Override protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
             Player player, InteractionHand hand, BlockHitResult hit) {
