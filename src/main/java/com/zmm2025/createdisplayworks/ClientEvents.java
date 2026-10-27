@@ -13,6 +13,8 @@ public final class ClientEvents {
     }
     @SubscribeEvent public static void setup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
         com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity.clientTick=com.zmm2025.createdisplayworks.flipdot.DiscRattle::update;
+        net.neoforged.fml.ModList.get().getModContainerById(CreateDisplayWorks.MOD_ID).ifPresent(mod->mod.registerExtensionPoint(
+            net.neoforged.neoforge.client.gui.IConfigScreenFactory.class,net.neoforged.neoforge.client.gui.ConfigurationScreen::new));
         net.createmod.ponder.foundation.PonderIndex.addPlugin(new com.zmm2025.createdisplayworks.ponder.DisplayWorksPonderPlugin());
         com.zmm2025.createdisplayworks.media.MediaNetwork.openScreen = data -> net.minecraft.client.Minecraft.getInstance().setScreen(
             new com.zmm2025.createdisplayworks.media.MediaScreen(data.pos(),data.columns(),data.rows(),data.filename(),data.thumbnail(),data.frames(),data.playing(),data.loop()));

@@ -13,6 +13,9 @@ import com.zmm2025.createdisplayworks.media.MediaClip;
 
 public class FlipDotBlockEntity extends KineticBlockEntity {
     public static java.util.function.Consumer<FlipDotBlockEntity> clientTick=be->{};
+    private static final int BROADCAST_DELAY=1;
+    private boolean clientStartPending;
+    private double clientLag;
     private boolean soundController;
     private long displayed, pending, flipStarted;
     private int duration = 1;
@@ -216,6 +219,28 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public int movingDiscs(float partial) { return motion.moving(level.getGameTime()+partial); }
     public float discSpeed() { return motion.speed(); }
     public float angle(int index,float partial) { return motion.angle(index,level.getGameTime()+partial); }
+    /**
+     * Update packets are built in the server tick after a flip starts, and they reach the client later still. A 256 RPM
+     * flip lasts one tick, so replaying it on the server's clock would show it already finished. Up to
+     * {@link #BROADCAST_DELAY} ticks of that delay start the flip on the client's clock instead; anything older (a
+     * packet sent mid-flip or after it settled) keeps its place in the motion.
+     */
+    private double clientMotionTime(CompoundTag tag) {
+        double start=tag.getDouble("MotionTime"),sent=tag.contains("SentTime")?tag.getDouble("SentTime"):start;
+        clientLag=Math.max(0,sent-start-BROADCAST_DELAY);
+        if(level==null||!level.isClientSide)return sent-clientLag;
+        clientStartPending=true;
+        return level.getGameTime()-clientLag;
+    }
+    /**
+     * Packets are handled partway through a client tick, so the flip restarts on the first frame that draws it, using
+     * that frame's exact time.
+     */
+    public void startClientMotion(float partial) {
+        if(!clientStartPending||level==null)return;
+        clientStartPending=false;
+        motion.reanchor(level.getGameTime()+partial-clientLag);
+    }
     @Override protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
         tag.putLong("Dots", displayed); tag.putLong("PendingDots", pending);
@@ -223,9 +248,11 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         tag.putInt("Dye", dye.getId());tag.putInt("BackDye",backDye.getId());tag.putBoolean("PaletteSet",paletteSet);
         tag.putBoolean("SoundController",soundController);tag.putInt("BoardWidth",boardWidth);tag.putInt("BoardHeight",boardHeight);
         double time=level==null?0:level.getGameTime();
-        float[] angles=motion.snapshot(time);int[] encoded=new int[64];
+        // Clients get the angles from the start of the current flip, not the angles at send time.
+        float[] angles=motion.snapshot(clientPacket?motion.anchor():time);int[] encoded=new int[64];
         for(int i=0;i<64;i++)encoded[i]=Float.floatToIntBits(angles[i]);
-        tag.putIntArray("Angles",encoded);tag.putFloat("MotionRPM",motion.speed());tag.putDouble("MotionTime",clientPacket?time:0);
+        tag.putIntArray("Angles",encoded);tag.putFloat("MotionRPM",motion.speed());
+        tag.putDouble("MotionTime",clientPacket?motion.anchor():0);if(clientPacket)tag.putDouble("SentTime",time);
         tag.putInt("PlaybackDelay",playbackDelay);tag.putBoolean("WasPowered",wasPowered);
         if(knownController!=null)tag.putLong("KnownController",knownController.asLong());
         tag.putLongArray("KnownMembers",knownMembers);
@@ -243,7 +270,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         soundController=tag.getBoolean("SoundController");paletteSet=tag.getBoolean("PaletteSet");boardWidth=tag.getInt("BoardWidth");boardHeight=tag.getInt("BoardHeight");
         int[] encoded=tag.getIntArray("Angles");float[] angles=new float[64];
         for(int i=0;i<64;i++)angles[i]=encoded.length==64?Float.intBitsToFloat(encoded[i]):((displayed&(1L<<i))==0?180:0);
-        motion.restore(angles,displayed,tag.getFloat("MotionRPM"),clientPacket?tag.getDouble("MotionTime"):0);
+        motion.restore(angles,displayed,tag.getFloat("MotionRPM"),clientPacket?clientMotionTime(tag):0);
         knownController=tag.contains("KnownController")?BlockPos.of(tag.getLong("KnownController")):null;knownMembers=tag.getLongArray("KnownMembers");
         if(knownMembers.length>256)knownMembers=new long[0];
         restoreClock=!clientPacket;wasPowered=tag.getBoolean("WasPowered");playbackDelay=Math.clamp(tag.getInt("PlaybackDelay"),0,20/MediaClip.FPS);

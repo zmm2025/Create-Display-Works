@@ -25,6 +25,9 @@ public final class DiscMotion {
         return count;
     }
     public float speed() { return rpm; }
+    public double anchor() { return anchor; }
+    /** Moves the start of the current motion to {@code time}, keeping its starting angles. */
+    public void reanchor(double time) { anchor = time; }
     public float[] snapshot(double time) {
         float[] result = new float[64];
         for (int i = 0; i < 64; i++) result[i] = angle(i, time);
