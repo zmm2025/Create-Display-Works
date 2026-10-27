@@ -14,6 +14,7 @@ public final class CreateDisplayWorks
         ModContent.register(bus);
         com.zmm2025.createdisplayworks.media.MediaNetwork.registerLifecycle();
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER,com.zmm2025.createdisplayworks.media.MediaLimits.SPEC);
+        container.registerConfig(net.neoforged.fml.config.ModConfig.Type.CLIENT,ClientConfig.SPEC);
         bus.addListener(this::setup);
         bus.addListener(com.zmm2025.createdisplayworks.media.MediaNetwork::register);
     }

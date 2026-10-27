@@ -21,5 +21,7 @@
   "create_display_works.ponder.flip_dot_media.text_2": "Dot frames are saved in the world. Slow cogs may not finish each flip before the next frame arrives. New Display Link input replaces media playback.",
   "create_display_works.ponder.flip_dot_media.text_3": "For hand-drawn symbols, start a Clipboard page with [pixels]. Add rows using # for light dots and periods or spaces for dark dots.",
   "subtitles.create_display_works.disc_rattle": "Display discs rattle",
-  "message.create_display_works.media_canvas_limit": "Media needs a canvas of at most 256 block spaces, including gaps."
+  "message.create_display_works.media_canvas_limit": "Media needs a canvas of at most 256 block spaces, including gaps.",
+  "create_display_works.configuration.motionBlur": "Disc Motion Blur",
+  "create_display_works.configuration.motionBlur.tooltip": "Experimental: flipping discs leave fading copies along their path, which makes fast flips easier to follow."
 }
