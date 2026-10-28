@@ -56,3 +56,11 @@ Don't use computer use for this. Keep these rules in mind:
 - Prefer verifying with `/status`, command output (`execute if block ...`, `data get ...`) and screenshots before you
   claim something works in-game.
 - In PowerShell, call `curl.exe`, not `curl`.
+
+## Branch names
+
+T3 Code names each thread's branch from the user's first message, before any code exists, so the name can stop
+matching the work as the scope grows. Before a branch's first push, or before opening a PR, compare the branch name
+with the full diff against `main`. If the name no longer describes the change, rename the branch locally with
+`git branch -m <type>/<short-description>` before pushing. Use the `feat/`, `fix/`, `docs/` or `chore/` prefix that
+fits the change. If the branch is already on GitHub, ask before renaming it there.
