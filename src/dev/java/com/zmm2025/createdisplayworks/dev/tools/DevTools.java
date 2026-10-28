@@ -55,19 +55,19 @@ import java.util.function.Supplier;
 /**
  * Development-only tooling for the {@code runDevClient} run: auto-joins the shared test world, hot-reloads code,
  * assets and data, and lets agents drive the dev player over a localhost-only HTTP API (see DEVELOPMENT.md).
- * Inert unless the run sets {@code csol.dev.tools}.
+ * Inert unless the run sets {@code createdisplayworks.dev.tools}.
  */
 @EventBusSubscriber(modid=CreateDisplayWorks.MOD_ID, value=Dist.CLIENT)
 public final class DevTools {
-    static final boolean ENABLED = Boolean.getBoolean("csol.dev.tools");
-    private static final Logger LOGGER = LoggerFactory.getLogger("CSoL Dev Tools");
-    private static final String WORKTREE = System.getProperty("csol.dev.worktree", "");
+    static final boolean ENABLED = Boolean.getBoolean("createdisplayworks.dev.tools");
+    private static final Logger LOGGER = LoggerFactory.getLogger("Display Works Dev Tools");
+    private static final String WORKTREE = System.getProperty("createdisplayworks.dev.worktree", "");
     /** Created as soon as the mod's event subscribers load, so the baseline matches the classes the game loaded. */
-    private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("csol.dev.classRoots"), paths("csol.dev.resourceRoots")) : null;
+    private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("createdisplayworks.dev.classRoots"), paths("createdisplayworks.dev.resourceRoots")) : null;
     private static final String RELOADED = "Your Minecraft client has been reloaded.";
     private static volatile PendingScreenshot screenshot;
     /** Which worktree and branch this client runs; shown in the window title. */
-    private static final String LABEL = System.getProperty("csol.dev.label", "dev client");
+    private static final String LABEL = System.getProperty("createdisplayworks.dev.label", "dev client");
     private static FileChannel clientLock;
     private static boolean titled;
     private static Object titledScreen, titledLevel;
@@ -87,7 +87,7 @@ public final class DevTools {
                 // Held until the game exits; runDevClient checks it so only one dev client runs at a time.
                 clientLock = FileChannel.open(gameDirectory.resolve("dev-client.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                 if(clientLock.tryLock() == null) LOGGER.warn("Another dev client is already using {}", gameDirectory);
-                int port = Integer.getInteger("csol.dev.controlPort", 25595);
+                int port = Integer.getInteger("createdisplayworks.dev.controlPort", 25595);
                 DevControlServer.start(port);
                 LOGGER.info("Dev control API listening on http://127.0.0.1:{} for {}", port, LABEL);
             } catch(IOException e) {
