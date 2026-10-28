@@ -212,7 +212,7 @@ abstract class DevReloadTask extends DefaultTask {
             response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
                     .send(request, HttpResponse.BodyHandlers.ofString())
         } catch (ConnectException ignored) {
-            logger.lifecycle('DEV RELOAD: NO SESSION - no dev client is running; start one with ./gradlew runDevClient')
+            logger.lifecycle('DEV RELOAD: NO SESSION - Launch Minecraft to try these changes.')
             return
         }
         Map result = new JsonSlurper().parseText(response.body()) as Map
