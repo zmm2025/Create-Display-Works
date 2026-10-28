@@ -64,7 +64,7 @@ public final class DevTools {
     private static final String WORKTREE = System.getProperty("csol.dev.worktree", "");
     /** Created as soon as the mod's event subscribers load, so the baseline matches the classes the game loaded. */
     private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("csol.dev.classRoots"), paths("csol.dev.resourceRoots")) : null;
-    private static final String RELOADED = "Your live Minecraft session has been reloaded with the latest changes.";
+    private static final String RELOADED = "Your Minecraft client has been reloaded.";
     private static volatile PendingScreenshot screenshot;
     /** Which worktree and branch this client runs; shown in the window title. */
     private static final String LABEL = System.getProperty("csol.dev.label", "dev client");
@@ -150,9 +150,9 @@ public final class DevTools {
 
     static JsonObject reload(String worktree, boolean full) throws Exception {
         if(worktree != null && !samePath(worktree, WORKTREE))
-            return failure("This game was launched from " + WORKTREE + ", not " + worktree + ". Reload from that checkout or restart the dev client from this one.");
+            return failure("This game was launched from " + WORKTREE + ", not " + worktree + ". Close it and press Launch Minecraft in this worktree to try these changes.");
         Instrumentation instrumentation = instrumentation();
-        if(instrumentation == null) return failure("The dev agent is not attached; launch the game with ./gradlew runDevClient.");
+        if(instrumentation == null) return failure("The dev agent is not attached. Close Minecraft and press Launch Minecraft to try these changes.");
         HotReloader.Result result = RELOADER.reload(instrumentation, DevTools.class.getClassLoader());
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
@@ -176,10 +176,10 @@ public final class DevTools {
         String status, message;
         if(!result.restartReasons().isEmpty()) {
             status = "restart-required";
-            message = "Restart the dev client to apply every change.";
+            message = "Restart Minecraft to try these changes.";
         } else if(result.changes().isEmpty() && !full) {
             status = "no-changes";
-            message = "Nothing changed since the last reload.";
+            message = "No reload or restart needed.";
         } else {
             status = "reloaded";
             message = RELOADED;

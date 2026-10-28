@@ -20,7 +20,7 @@ themselves only call the Gradle tasks above, so their behaviour lives in the rep
 
 | Name | Command | Icon |
 | --- | --- | --- |
-| Run Minecraft | `./gradlew runDevClient` | play |
+| Launch Minecraft | `./gradlew runDevClient` | play |
 | Reload Minecraft | `./gradlew devReload` | build |
 
 Agents run `devReload` at the end of each turn (see [AGENTS.md](AGENTS.md)), so the **Reload Minecraft** button
@@ -52,7 +52,7 @@ so the game keeps running and stays controllable in the background.
 
 The dev client loads this mod, Create, Ponder and Flywheel from Gradle. To add testing helpers such as Jade or EMI,
 add them to the [Modrinth App](https://modrinth.com/app) profile **Create: Display Works Dev** (NeoForge 1.21.1,
-stored in the `profiles/Create Display Works Dev` folder). Create one if it doesn't exist yet. Each **Run Minecraft**
+stored in the `profiles/Create Display Works Dev` folder). Create one if it doesn't exist yet. Each **Launch Minecraft**
 copies the profile's enabled mods into `run/mods`. Mods you remove or disable in the profile are removed from
 `run/mods` on the next launch, and jars you put in `run/mods` by hand are left alone.
 
@@ -61,13 +61,13 @@ copies the profile's enabled mods into `run/mods`. Mods you remove or disable in
   [gradle.properties](gradle.properties).
 - To use another profile, or any folder of mod jars, set `devModsProfile=<profile name or absolute path>` in
   `~/.gradle/gradle.properties` or pass `-PdevModsProfile=...`.
-- Launching the profile itself from the Modrinth App doesn't include this mod. Use **Run Minecraft** for that.
+- Launching the profile itself from the Modrinth App doesn't include this mod. Use **Launch Minecraft** for that.
 
 ### One client at a time
 
 Only one dev client runs at a time, because every worktree shares the same game directory and test world. Pressing
-**Run Minecraft** while a client is already running fails without launching, and names the worktree that client
-runs. To test another worktree, close the running client first, then press **Run Minecraft** in that worktree.
+**Launch Minecraft** while a client is already running fails without launching, and names the worktree that client
+runs. To test another worktree, close the running client first, then press **Launch Minecraft** in that worktree.
 
 The window title starts with the branch and worktree the client runs, for example
 `t3/minecraft-live-reload-testing (t3-dab23ea6) | Minecraft 1.21.1 - Singleplayer`. The same label appears in chat
