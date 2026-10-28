@@ -1,6 +1,6 @@
 # Agent instructions
 
-The user tests changes in a live Minecraft dev client started with `./gradlew runDevClient` (the **Run Minecraft**
+The user tests changes in a live Minecraft dev client started with `./gradlew runDevClient` (the **Launch Minecraft**
 script in T3 Code). [DEVELOPMENT.md](DEVELOPMENT.md) explains the setup.
 
 ## When you finish a turn
@@ -12,13 +12,14 @@ Then end your reply with one short line that matches the result:
 
 | `devReload` output | Closing line |
 | --- | --- |
-| `DEV RELOAD: RELOADED` | "Your live Minecraft session has been reloaded with these changes." |
-| `DEV RELOAD: NO CHANGES` | "Your live Minecraft session is already up to date." |
-| `DEV RELOAD: NO SESSION` | "Minecraft isn't running; press **Run Minecraft** to try these changes." |
-| `DEV RELOAD: RESTART REQUIRED` | "**Restart needed:** close Minecraft and press **Run Minecraft**", followed by the reasons it printed, in plain words. |
-| `DEV RELOAD: ERROR` | Explain what went wrong. If the game was launched from another worktree, say so: the user has to close it and press **Run Minecraft** in this worktree to try these changes. |
+| `DEV RELOAD: RELOADED` | ✅ **Your Minecraft client has been reloaded.** |
+| `DEV RELOAD: NO CHANGES` | ✅ **No reload or restart needed.** |
+| `DEV RELOAD: NO SESSION` | 🚀 **Launch Minecraft to try these changes.** |
+| `DEV RELOAD: RESTART REQUIRED` | ⚠️ **Restart Minecraft to try these changes.** followed by the reasons it printed, in plain words and not in bold. |
+| `DEV RELOAD: ERROR` | Explain what went wrong. If the game was launched from another worktree, say so: the user has to close it and press **Launch Minecraft** in this worktree to try these changes. |
 
-`devReload` can't see every restart-only change. Say a restart is needed, even if it printed `RELOADED`, when you:
+`devReload` can't see every restart-only change. Use the restart line, with the reason in plain words, even if it
+printed `RELOADED`, when you:
 
 - register anything new: blocks, items, block entities, menus, entities, sounds, data components, creative tabs or
   network payloads
