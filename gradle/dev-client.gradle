@@ -86,13 +86,13 @@ neoForge.runs {
         taskBefore devAgentJar
         jvmArguments.add(devAgentJar.flatMap { it.archiveFile }.map { "-javaagent:${it.asFile.absolutePath}".toString() })
         if (devUseJbr) jvmArgument '-XX:+AllowEnhancedClassRedefinition'
-        systemProperty 'csol.dev.tools', 'true'
-        systemProperty 'csol.dev.world', devWorldName
-        systemProperty 'csol.dev.controlPort', devControlPort
-        systemProperty 'csol.dev.worktree', devPath(projectDir)
-        systemProperty 'csol.dev.label', devLabel
-        systemProperty 'csol.dev.classRoots', classRoots
-        systemProperty 'csol.dev.resourceRoots', resourceRoots
+        systemProperty 'createdisplayworks.dev.tools', 'true'
+        systemProperty 'createdisplayworks.dev.world', devWorldName
+        systemProperty 'createdisplayworks.dev.controlPort', devControlPort
+        systemProperty 'createdisplayworks.dev.worktree', devPath(projectDir)
+        systemProperty 'createdisplayworks.dev.label', devLabel
+        systemProperty 'createdisplayworks.dev.classRoots', classRoots
+        systemProperty 'createdisplayworks.dev.resourceRoots', resourceRoots
     }
 }
 

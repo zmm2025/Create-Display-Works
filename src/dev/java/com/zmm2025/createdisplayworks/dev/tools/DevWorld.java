@@ -23,7 +23,7 @@ import net.minecraft.world.level.levelgen.structure.StructureSet;
 
 /** Opens the shared dev test world on launch, creating it with the standard test settings if it doesn't exist yet. */
 final class DevWorld {
-    static final String NAME = System.getProperty("csol.dev.world", "Dev Testing World");
+    static final String NAME = System.getProperty("createdisplayworks.dev.world", "Dev Testing World");
     private static final String LAYERS = "minecraft:bedrock,62*minecraft:dirt,minecraft:grass_block;minecraft:the_void";
     private static boolean opened;
     /** Set when this session created the world, so the first player join can finish the setup. */
