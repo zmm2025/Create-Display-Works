@@ -1,7 +1,10 @@
 package com.zmm2025.createdisplayworks.dev.tools;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.platform.Window;
@@ -11,6 +14,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.tutorial.TutorialSteps;
 import net.minecraft.commands.CommandSource;
@@ -40,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.instrument.Instrumentation;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
@@ -49,7 +54,10 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
@@ -66,6 +74,16 @@ public final class DevTools {
     private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("csol.dev.classRoots"), paths("csol.dev.resourceRoots")) : null;
     private static final String RELOADED = "Your Minecraft client has been reloaded.";
     private static volatile PendingScreenshot screenshot;
+    /** Encodes and saves screenshot frames off the render thread, so a sequence doesn't stall the frames it captures. */
+    private static final ExecutorService SCREENSHOT_WRITERS = Executors.newFixedThreadPool(Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 6), task -> {
+        Thread thread = new Thread(task, "CSoL Screenshot Writer");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /** Frames waiting to be saved before capture skips frames rather than buffer more full-size images. */
+    private static final int MAX_UNSAVED_FRAMES = 32;
+    /** Frames shown on a contact sheet; longer sequences show evenly spread frames. */
+    private static final int SHEET_FRAMES = 36;
     /** Which worktree and branch this client runs; shown in the window title. */
     private static final String LABEL = System.getProperty("csol.dev.label", "dev client");
     private static FileChannel clientLock;
@@ -87,8 +105,10 @@ public final class DevTools {
                 // Held until the game exits; runDevClient checks it so only one dev client runs at a time.
                 clientLock = FileChannel.open(gameDirectory.resolve("dev-client.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                 if(clientLock.tryLock() == null) LOGGER.warn("Another dev client is already using {}", gameDirectory);
-                int port = Integer.getInteger("csol.dev.controlPort", 25595);
-                DevControlServer.start(port);
+                // Worktree games pass port 0 and get a free one; DevInstance records it for Gradle and agents.
+                int port = DevControlServer.start(Integer.getInteger("csol.dev.controlPort", 25595));
+                DevInstance.started(port, WORKTREE);
+                DevSounds.track();
                 LOGGER.info("Dev control API listening on http://127.0.0.1:{} for {}", port, LABEL);
             } catch(IOException e) {
                 LOGGER.error("Dev control API could not start", e);
@@ -99,6 +119,7 @@ public final class DevTools {
     /** Vanilla rewrites the window title whenever the screen or level changes, so relabel it after each change. */
     @SubscribeEvent public static void clientTick(ClientTickEvent.Post event) {
         if(!ENABLED) return;
+        DevInstance.tick();
         Minecraft minecraft = Minecraft.getInstance();
         if(titled && minecraft.screen == titledScreen && minecraft.level == titledLevel) return;
         titled = true;
@@ -123,27 +144,46 @@ public final class DevTools {
     }
 
     @SubscribeEvent public static void frameRendered(RenderFrameEvent.Post event) {
+        if(!ENABLED) return;
+        DevInspect.frameRendered();
+        DevPerf.frameRendered();
         PendingScreenshot pending = screenshot;
         if(pending == null || pending.framesToWait-- > 0) return;
         long now = System.nanoTime();
         if(pending.times.isEmpty()) pending.start = now;
         else if(now < pending.start + pending.times.size() * pending.intervalNanos) return;
+        if(pending.unsaved.get() >= MAX_UNSAVED_FRAMES) return;
         Minecraft minecraft = Minecraft.getInstance();
-        try(NativeImage image = Screenshot.takeScreenshot(minecraft.getMainRenderTarget())) {
-            Path file = pending.files.get(pending.times.size());
-            Files.createDirectories(file.getParent());
-            image.writeToFile(file);
-            pending.times.add((now - pending.start) / 1_000_000);
+        NativeImage image;
+        try {
+            image = Screenshot.takeScreenshot(minecraft.getMainRenderTarget());
         } catch(Exception e) {
             screenshot = null;
             minecraft.options.hideGui = pending.hideGuiBefore;
             pending.result.completeExceptionally(e);
             return;
         }
+        Path file = pending.files.get(pending.times.size());
+        pending.times.add((now - pending.start) / 1_000_000.0);
+        pending.gameTimes.add(minecraft.level == null ? 0.0 : minecraft.level.getGameTime() + (double)minecraft.getTimer().getGameTimeDeltaPartialTick(false));
+        pending.unsaved.incrementAndGet();
+        pending.saves.add(CompletableFuture.runAsync(() -> {
+            try(image) {
+                Files.createDirectories(file.getParent());
+                image.writeToFile(file);
+            } catch(IOException e) {
+                throw new UncheckedIOException(e);
+            } finally {
+                pending.unsaved.decrementAndGet();
+            }
+        }, SCREENSHOT_WRITERS));
         if(pending.times.size() < pending.files.size()) return;
         screenshot = null;
         minecraft.options.hideGui = pending.hideGuiBefore;
-        pending.result.complete(pending.files);
+        CompletableFuture.allOf(pending.saves.toArray(CompletableFuture[]::new)).whenComplete((done, error) -> {
+            if(error != null) pending.result.completeExceptionally(error);
+            else pending.result.complete(pending.files);
+        });
     }
 
     // ---- Actions behind the control API. Each returns a JSON response body. ----
@@ -208,6 +248,7 @@ public final class DevTools {
             status.addProperty("world", server == null ? null : server.getWorldData().getLevelName());
             status.addProperty("screen", minecraft.screen == null ? null : minecraft.screen.getClass().getName());
             status.addProperty("fps", minecraft.getFps());
+            status.addProperty("hidden", DevInstance.hidden());
             Window window = minecraft.getWindow();
             JsonObject windowJson = new JsonObject();
             windowJson.addProperty("width", window.getWidth());
@@ -233,27 +274,106 @@ public final class DevTools {
         });
     }
 
-    static JsonObject command(String command) throws Exception {
-        String text = command.strip().startsWith("/") ? command.strip().substring(1) : command.strip();
+    /**
+     * Runs one command, or a JSON array of steps in order. A step is a command, {@code {"waitTicks": n}}, or
+     * {@code {"waitUntil": "<command>", "timeoutTicks": n}}, which reruns the command each tick until it succeeds and
+     * stops the batch if it never does. Consecutive commands run within one server task. A batch returns each step's
+     * result and is {@code ok} only if all of them succeeded.
+     */
+    static JsonObject command(String body) throws Exception {
+        boolean batch = body.strip().startsWith("[");
+        List<JsonElement> steps = new ArrayList<>();
+        if(batch) JsonParser.parseString(body).getAsJsonArray().forEach(steps::add);
+        else steps.add(new JsonPrimitive(body));
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
         if(server == null || minecraft.player == null) return failure("Not in a single-player world.");
         UUID id = minecraft.player.getUUID();
-        List<String> output = Collections.synchronizedList(new ArrayList<>());
+        JsonArray results = new JsonArray();
+        boolean ok = true;
+        for(int i = 0; i < steps.size(); i++) {
+            JsonElement step = steps.get(i);
+            if(step.isJsonPrimitive()) {
+                List<String> commands = new ArrayList<>();
+                for(; i < steps.size() && steps.get(i).isJsonPrimitive(); i++) commands.add(steps.get(i).getAsString());
+                i--;
+                for(JsonObject result : runCommands(server, id, commands, batch)) {
+                    ok &= result.get("ok").getAsBoolean();
+                    results.add(result);
+                }
+                continue;
+            }
+            JsonObject wait = step.getAsJsonObject(), result = new JsonObject();
+            if(wait.has("waitTicks")) {
+                int ticks = wait.get("waitTicks").getAsInt();
+                waitTicks(server, ticks);
+                result.addProperty("waitTicks", ticks);
+                result.addProperty("ok", true);
+            } else if(wait.has("waitUntil")) {
+                String command = wait.get("waitUntil").getAsString();
+                int timeout = wait.has("timeoutTicks") ? wait.get("timeoutTicks").getAsInt() : 200, waited = 0;
+                JsonObject attempt = runCommands(server, id, List.of(command), false).get(0);
+                while(!attempt.get("ok").getAsBoolean() && waited < timeout) {
+                    waitTicks(server, 1);
+                    waited++;
+                    attempt = runCommands(server, id, List.of(command), false).get(0);
+                }
+                result.addProperty("waitUntil", command);
+                result.addProperty("ok", attempt.get("ok").getAsBoolean());
+                result.addProperty("ticks", waited);
+                result.add("output", attempt.get("output"));
+            } else throw new IllegalArgumentException("Unknown step " + wait + "; use a command, waitTicks or waitUntil.");
+            results.add(result);
+            if(!result.get("ok").getAsBoolean()) {
+                ok = false;
+                result.addProperty("skippedSteps", steps.size() - i - 1);
+                break;
+            }
+        }
+        if(!batch) return results.get(0).getAsJsonObject();
+        JsonObject response = new JsonObject();
+        response.addProperty("ok", ok);
+        response.add("results", results);
+        return response;
+    }
+
+    private static List<JsonObject> runCommands(MinecraftServer server, UUID id, List<String> commands, boolean echo) throws Exception {
+        return server.submit(() -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            List<JsonObject> done = new ArrayList<>();
+            for(String command : commands) done.add(runCommand(server, player, command, echo));
+            return done;
+        }).get(1, TimeUnit.MINUTES);
+    }
+
+    /** Blocks until the server has run {@code ticks} more ticks. */
+    private static void waitTicks(MinecraftServer server, int ticks) throws Exception {
+        if(ticks < 0 || ticks > 1200) throw new IllegalArgumentException("Wait 0-1200 ticks.");
+        int target = server.submit(server::getTickCount).get(1, TimeUnit.MINUTES) + ticks;
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(5_000 + ticks * 250L);
+        while(server.getTickCount() < target) {
+            if(System.nanoTime() > deadline) throw new IllegalStateException("The server stopped ticking; is the game paused or frozen with /tick freeze?");
+            Thread.sleep(5);
+        }
+    }
+
+    private static JsonObject runCommand(MinecraftServer server, ServerPlayer player, String command, boolean echo) {
+        String text = command.strip().startsWith("/") ? command.strip().substring(1) : command.strip();
+        // A player who isn't flying falls after a teleport, which spoils the view it was meant to set up.
+        if(text.startsWith("tp ") || text.startsWith("teleport ")) DevCamera.keepFlying(player);
+        List<String> output = new ArrayList<>();
         boolean[] success = {false};
         int[] value = {0};
-        server.submit(() -> {
-            ServerPlayer player = server.getPlayerList().getPlayer(id);
-            CommandSource sink = new CommandSource() {
-                @Override public void sendSystemMessage(Component message) { output.add(message.getString()); }
-                @Override public boolean acceptsSuccess() { return true; }
-                @Override public boolean acceptsFailure() { return true; }
-                @Override public boolean shouldInformAdmins() { return false; }
-            };
-            server.getCommands().performPrefixedCommand(player.createCommandSourceStack().withSource(sink).withPermission(4)
-                .withCallback((ok, result) -> { success[0] |= ok; value[0] = result; }), text);
-        }).get(1, TimeUnit.MINUTES);
+        CommandSource sink = new CommandSource() {
+            @Override public void sendSystemMessage(Component message) { output.add(message.getString()); }
+            @Override public boolean acceptsSuccess() { return true; }
+            @Override public boolean acceptsFailure() { return true; }
+            @Override public boolean shouldInformAdmins() { return false; }
+        };
+        server.getCommands().performPrefixedCommand(player.createCommandSourceStack().withSource(sink).withPermission(4)
+            .withCallback((ok, result) -> { success[0] |= ok; value[0] = result; }), text);
         JsonObject response = new JsonObject();
+        if(echo) response.addProperty("command", text);
         response.addProperty("ok", success[0]);
         response.addProperty("result", value[0]);
         response.add("output", strings(output));
@@ -262,10 +382,13 @@ public final class DevTools {
 
     /**
      * Captures one frame, or a sequence of {@code frames} taken {@code intervalMs} apart for checking motion. A sequence
-     * also gets a contact sheet: every frame in one image, left to right then top to bottom.
+     * also gets a contact sheet, up to 36 evenly spread frames in one image, left to right then top to bottom, and
+     * optionally a {@code video} (mp4 or gif) that plays at the speed the frames were captured. Without the HUD, an
+     * open chat is closed first; any other open screen is named in {@code screen}, since it still shows.
      */
-    static JsonObject screenshot(boolean hud, int frames, int intervalMs) throws Exception {
-        if(frames < 1 || frames > 120 || intervalMs < 0 || intervalMs > 10_000) return failure("Use 1-120 frames and an interval of 0-10000 ms.");
+    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video) throws Exception {
+        if(frames < 1 || frames > 600 || intervalMs < 0 || intervalMs > 10_000) return failure("Use 1-600 frames and an interval of 0-10000 ms.");
+        if(video != null && frames < 2) return failure("A video needs at least 2 frames.");
         Minecraft minecraft = Minecraft.getInstance();
         String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS"));
         Path folder = minecraft.gameDirectory.toPath().resolve("screenshots/dev-tools").toAbsolutePath().normalize();
@@ -273,47 +396,72 @@ public final class DevTools {
         if(frames == 1) files.add(folder.resolve(name + ".png"));
         else for(int i = 0; i < frames; i++) files.add(folder.resolve(name).resolve(String.format("frame-%03d.png", i)));
         PendingScreenshot pending = new PendingScreenshot(files, intervalMs * 1_000_000L);
-        minecraft.submit(() -> {
+        String screen = minecraft.submit(() -> {
+            if(!hud && minecraft.screen instanceof ChatScreen) minecraft.setScreen(null);
             pending.hideGuiBefore = minecraft.options.hideGui;
             minecraft.options.hideGui = !hud;
             screenshot = pending;
+            return minecraft.screen == null ? null : minecraft.screen.getClass().getSimpleName();
         }).get(1, TimeUnit.MINUTES);
         pending.result.get(30 + (long)frames * intervalMs / 1000, TimeUnit.SECONDS);
         JsonObject response = new JsonObject();
         response.addProperty("ok", true);
+        if(screen != null) response.addProperty("screen", screen);
         if(frames == 1) {
             response.addProperty("path", files.get(0).toString());
             return response;
         }
-        response.addProperty("sheet", contactSheet(files, folder.resolve(name).resolve("sheet.png")).toString());
+        List<Integer> sheetFrames = new ArrayList<>();
+        for(int i = 0, shown = Math.min(frames, SHEET_FRAMES); i < shown; i++) sheetFrames.add(shown == frames ? i : (int)Math.round(i * (frames - 1.0) / (shown - 1)));
+        response.addProperty("sheet", contactSheet(sheetFrames.stream().map(files::get).toList(), folder.resolve(name).resolve("sheet.png")).toString());
+        if(sheetFrames.size() < frames) {
+            JsonArray shown = new JsonArray();
+            sheetFrames.forEach(shown::add);
+            response.add("sheetFrames", shown);
+        }
         response.add("frames", strings(files.stream().map(Path::toString).toList()));
-        JsonArray times = new JsonArray();
-        pending.times.forEach(times::add);
+        JsonArray times = new JsonArray(), gameTimes = new JsonArray();
+        pending.times.forEach(time -> times.add(Math.round(time * 10) / 10.0));
+        pending.gameTimes.forEach(time -> gameTimes.add(Math.round(time * 1000) / 1000.0));
         response.add("timesMs", times);
+        response.add("gameTimes", gameTimes);
+        if(video != null) {
+            try {
+                response.addProperty("video", DevVideo.encode(files, pending.times, video).toString());
+            } catch(IOException | IllegalArgumentException e) {
+                response.addProperty("videoError", e.getMessage());
+            }
+        }
         return response;
     }
 
-    /** Tiles the frames into one image at most 1600 pixels wide, so a whole sequence can be viewed at once. */
+    /**
+     * Tiles the frames into one image at most 1600 pixels wide, so a whole sequence can be viewed at once. Reads one
+     * frame at a time, so long sequences don't hold every full-size frame in memory.
+     */
     private static Path contactSheet(List<Path> frames, Path sheet) throws IOException {
-        List<NativeImage> images = new ArrayList<>();
+        int columns = (int)Math.ceil(Math.sqrt(frames.size())), rows = (frames.size() + columns - 1) / columns, gap = 4;
+        NativeImage out = null;
         try {
-            for(Path frame : frames) try(var in = Files.newInputStream(frame)) { images.add(NativeImage.read(in)); }
-            int columns = (int)Math.ceil(Math.sqrt(images.size())), rows = (images.size() + columns - 1) / columns, gap = 4;
-            int width = images.get(0).getWidth(), height = images.get(0).getHeight();
-            double scale = Math.min(1, (1600.0 - gap * (columns - 1)) / columns / width);
-            int cellWidth = (int)(width * scale), cellHeight = (int)(height * scale);
-            try(NativeImage out = new NativeImage(columns * cellWidth + gap * (columns - 1), rows * cellHeight + gap * (rows - 1), true)) {
-                out.fillRect(0, 0, out.getWidth(), out.getHeight(), 0xFF000000);
-                for(int i = 0; i < images.size(); i++) {
-                    NativeImage image = images.get(i);
+            double scale = 1;
+            int cellWidth = 0, cellHeight = 0;
+            for(int i = 0; i < frames.size(); i++) {
+                try(var in = Files.newInputStream(frames.get(i)); NativeImage image = NativeImage.read(in)) {
+                    if(out == null) {
+                        scale = Math.min(1, (1600.0 - gap * (columns - 1)) / columns / image.getWidth());
+                        cellWidth = (int)(image.getWidth() * scale);
+                        cellHeight = (int)(image.getHeight() * scale);
+                        out = new NativeImage(columns * cellWidth + gap * (columns - 1), rows * cellHeight + gap * (rows - 1), true);
+                        out.fillRect(0, 0, out.getWidth(), out.getHeight(), 0xFF000000);
+                    }
                     int left = i % columns * (cellWidth + gap), top = i / columns * (cellHeight + gap);
                     for(int y = 0; y < cellHeight; y++) for(int x = 0; x < cellWidth; x++)
                         out.setPixelRGBA(left + x, top + y, image.getPixelRGBA((int)(x / scale), (int)(y / scale)));
                 }
-                out.writeToFile(sheet);
             }
+            out.writeToFile(sheet);
         } finally {
-            images.forEach(NativeImage::close);
+            if(out != null) out.close();
         }
         return sheet;
     }
@@ -396,7 +544,9 @@ public final class DevTools {
     private static final class PendingScreenshot {
         final List<Path> files;
         final long intervalNanos;
-        final List<Long> times = new ArrayList<>();
+        final List<Double> times = new ArrayList<>(), gameTimes = new ArrayList<>();
+        final List<CompletableFuture<Void>> saves = new ArrayList<>();
+        final AtomicInteger unsaved = new AtomicInteger();
         final CompletableFuture<List<Path>> result = new CompletableFuture<>();
         /** Lets the hidden or restored HUD reach a rendered frame before capturing. */
         int framesToWait = 2;
@@ -471,7 +621,7 @@ public final class DevTools {
         return n + " " + noun + (n == 1 ? "" : noun.endsWith("s") ? "es" : "s");
     }
 
-    private static double round(double value) {
+    static double round(double value) {
         return Math.round(value * 100) / 100.0;
     }
 }

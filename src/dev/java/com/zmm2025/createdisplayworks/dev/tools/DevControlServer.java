@@ -18,7 +18,8 @@ import java.util.concurrent.Executors;
 final class DevControlServer {
     private DevControlServer() {}
 
-    static void start(int port) throws IOException {
+    /** Starts the API on {@code port}, or on a free port for 0, and returns the port it listens on. */
+    static int start(int port) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), port), 0);
         server.setExecutor(Executors.newSingleThreadExecutor(task -> {
             Thread thread = new Thread(task, "CSoL Dev Control");
@@ -27,20 +28,28 @@ final class DevControlServer {
         }));
         server.createContext("/", DevControlServer::handle);
         server.start();
+        return server.getAddress().getPort();
     }
 
     private static void handle(HttpExchange exchange) throws IOException {
         JsonObject response;
         int code = 200;
+        DevInstance.touch();
         try {
             Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             response = switch(exchange.getRequestURI().getPath()) {
                 case "/status" -> DevTools.status();
+                case "/window" -> DevInstance.window(!"false".equals(query.get("show")));
                 case "/reload" -> DevTools.reload(query.get("worktree"), Boolean.parseBoolean(query.get("full")));
                 case "/command" -> DevTools.command(body.isBlank() ? query.getOrDefault("command", "") : body);
                 case "/screenshot" -> DevTools.screenshot(!"false".equals(query.get("hud")),
-                    Integer.parseInt(query.getOrDefault("frames", "1")), Integer.parseInt(query.getOrDefault("intervalMs", "100")));
+                    Integer.parseInt(query.getOrDefault("frames", "1")), Integer.parseInt(query.getOrDefault("intervalMs", "100")), query.get("video"));
+                case "/sounds" -> DevSounds.sounds(Long.parseLong(query.getOrDefault("sinceMs", "3000")), query.get("filter"));
+                case "/find" -> DevInspect.find(query);
+                case "/camera" -> DevCamera.camera(query);
+                case "/perf" -> DevPerf.perf(Double.parseDouble(query.getOrDefault("seconds", "5")), query.get("namespace"));
+                case "/blockentity" -> DevInspect.blockEntity(query);
                 case "/use" -> DevTools.interact(true, query);
                 case "/attack" -> DevTools.interact(false, query);
                 case "/key" -> DevTools.key(query.getOrDefault("key", body.strip()));

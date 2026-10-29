@@ -1,7 +1,8 @@
 # Agent instructions
 
 The user tests changes in a live Minecraft dev client started with `./gradlew runDevClient` (the **Launch Minecraft**
-script in T3 Code). [DEVELOPMENT.md](DEVELOPMENT.md) explains the setup.
+script in T3 Code). Each worktree runs its own game, with its own copy of the test world, so this worktree's game is
+yours to use. [DEVELOPMENT.md](DEVELOPMENT.md) explains the setup.
 
 ## When you finish a turn
 
@@ -16,7 +17,7 @@ Then end your reply with one short line that matches the result:
 | `DEV RELOAD: NO CHANGES` | ✅ **No reload or restart needed.** |
 | `DEV RELOAD: NO SESSION` | 🚀 **Launch Minecraft to try these changes.** |
 | `DEV RELOAD: RESTART REQUIRED` | ⚠️ **Restart Minecraft to try these changes.** followed by the reasons it printed, in plain words and not in bold. |
-| `DEV RELOAD: ERROR` | Explain what went wrong. If the game was launched from another worktree, say so: the user has to close it and press **Launch Minecraft** in this worktree to try these changes. |
+| `DEV RELOAD: ERROR` | Explain what went wrong. |
 
 `devReload` can't see every restart-only change. Use the restart line, with the reason in plain words, even if it
 printed `RELOADED`, when you:
@@ -31,14 +32,23 @@ If hot-swapped code only affects new objects or newly opened screens, tell the u
 the screen.
 
 Never tell the user to press F3+T or run `/reload`. Point them to the **Reload Minecraft** script button instead,
-which runs `./gradlew devReload`. Don't launch, close or restart the user's game unless they ask.
+which runs `./gradlew devReload`. In the main checkout, don't launch, close or restart the game unless the user asks,
+because it holds their main world. In a worktree, you may start its game with `devStart` (below) and leave it
+running; don't close or restart it while the user has its window shown.
 
 ## Driving the game
 
-While the dev client runs, you can control the `Dev` player through its localhost API on port 25595. Use it to
-build test setups, verify behaviour and capture demos. First check that the `worktree` reported by `/status` is this
-worktree. If it isn't, the game is running another worktree's code, so don't use it to verify your changes.
-Endpoints are listed under "Agent control API" in DEVELOPMENT.md:
+You control the `Dev` player through the game's localhost API. Use it to build test setups, verify behaviour and
+capture demos. Endpoints are listed under "Agent control API" in DEVELOPMENT.md.
+
+- To start this worktree's game, run `./gradlew devStart -PthreadId=<your T3 Code thread id>` (T3's thread tools give
+  the current thread's id). It opens a `minecraft` terminal in your thread, starts the game with its window hidden so
+  it doesn't disturb the user, and returns once the game is in its world, printing the control API's port. If the
+  game is already running, it just prints the port. Don't start it with `runDevClient`, which shows the window, or
+  in a background shell command, which the user can't see.
+- The port is also in `build/dev-client.json`. Check that `/status` reports this worktree before trusting a result.
+- The window stays hidden unless the user shows it. Don't call `/window?show=true` yourself.
+
 
 - `/command` runs commands as the player.
 - `/use`, `/attack`, `/key`, `/type` and `/click` send input.
@@ -47,12 +57,22 @@ Endpoints are listed under "Agent control API" in DEVELOPMENT.md:
   playback, capture a frame sequence with `/screenshot?frames=<n>&intervalMs=<ms>` and open the contact sheet it
   returns. One still image can't show motion. Choose the interval from the effect's speed, for example 50-100 ms
   for a 10 FPS animation, and use `timesMs` for the actual capture times.
-- Delete screenshots and frame folders you no longer need from `run/screenshots/dev-tools/`.
+- Delete screenshots and frame folders you no longer need from the `screenshots/dev-tools/` folder next to the PNGs.
+- `/sounds` shows what the game plays and how loud it reaches the player. Use it instead of recording audio.
+- `/blockentity` reads a block entity's fields on the client and server, and can sample them every frame. Use it
+  instead of adding temporary debug logging.
+- Send several commands as one JSON array to `/command`, with `waitTicks` or `waitUntil` steps instead of `sleep`.
+  Use `/find` to locate blocks instead of scanning coordinates one command at a time.
+- `/camera` flies the player to face a block or fit a whole display in view, and can screenshot in the same call. Use it
+  instead of guessing teleport coordinates.
+- `/perf` measures frame times and the mod's render cost. Use it to check that large or many displays stay fast.
+- Add `video=mp4` or `video=gif` to a frame sequence when the user wants a demo. "Testing tips" in DEVELOPMENT.md
+  has more shortcuts.
 
 Don't use computer use for this. Keep these rules in mind:
 
-- The world is the user's persistent test world. Build fixtures away from existing builds, and only clear areas you
-  created.
+- A worktree's world starts as a copy of the user's main world. Build fixtures away from existing builds, and only
+  clear areas you created; the user may open this world to look at your work.
 - Prefer verifying with `/status`, command output (`execute if block ...`, `data get ...`) and screenshots before you
   claim something works in-game.
 - In PowerShell, call `curl.exe`, not `curl`.
