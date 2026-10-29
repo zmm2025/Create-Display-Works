@@ -101,7 +101,7 @@ public final class MediaScreen extends AbstractSimiScreen {
         if(load==null)return;
         source.setEditable(!busy&&!saving);file.active=!busy&&!saving;load.active=!busy&&!saving&&!sourceValue.isBlank();
         balance.active=invertButton.active=ditherButton.active=!busy&&!saving&&original!=null;
-        invertButton.green=false;ditherButton.green=dither;
+        invertButton.green=invert;ditherButton.green=dither;
         for(int i=0;i<sizing.size();i++){sizing.get(i).green=scale.ordinal()==i;sizing.get(i).active=balance.active;}
         play.visible=repeat.visible=length.visible=video();
         play.active=repeat.active=!busy&&!saving;length.active=!busy&&!saving&&original!=null;
