@@ -111,8 +111,10 @@ public final class MediaNetwork {
                 var clip=MediaClip.fromArchive(upload.data);
                 if(clip.columns()!=group.width()||clip.rows()!=group.height())throw new IllegalArgumentException("Board dimensions changed");
                 group.controller().installMedia(clip);
-                player.displayClientMessage(Component.translatable("message.create_display_works.media_loaded",clip.count()),true);
-                PacketDistributor.sendToPlayer(player,new Status(p.pos,"Saved "+clip.count()+" frames.",true));
+                boolean still=clip.count()==1;
+                player.displayClientMessage(still?Component.translatable("message.create_display_works.media_loaded_image")
+                    :Component.translatable("message.create_display_works.media_loaded",clip.count()),true);
+                PacketDistributor.sendToPlayer(player,new Status(p.pos,still?"Saved 1 frame.":"Saved "+clip.count()+" frames.",true));
             }catch(IllegalArgumentException e){PacketDistributor.sendToPlayer(player,new Status(p.pos,"Unable to save this media. Import it again.",true));}
 
         }
