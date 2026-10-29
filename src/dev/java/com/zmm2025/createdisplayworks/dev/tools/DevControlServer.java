@@ -55,6 +55,7 @@ final class DevControlServer {
                 case "/key" -> DevTools.key(query.getOrDefault("key", body.strip()));
                 case "/type" -> DevTools.type(body.isEmpty() ? query.getOrDefault("text", "") : body);
                 case "/click" -> DevTools.click(Double.parseDouble(query.get("x")), Double.parseDouble(query.get("y")), Integer.parseInt(query.getOrDefault("button", "0")));
+                case "/mouse" -> DevTools.click(Double.parseDouble(query.get("x")), Double.parseDouble(query.get("y")), null);
                 default -> { code = 404; yield DevTools.failure("Unknown endpoint; see DEVELOPMENT.md."); }
             };
         } catch(Exception e) {

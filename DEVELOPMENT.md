@@ -147,7 +147,8 @@ returns JSON with an `ok` field. Requests run one at a time.
 | `POST /attack` | optional `?x=&y=&z=&face=` | Left-clicks: breaks the block in creative mode, or attacks the entity. |
 | `POST /key` | `?key=e` (GLFW names: `escape`, `enter`, `e`, `left.shift`, `f3`, ...) | Presses the key in the open screen, or as a game keybind when no screen is open. |
 | `POST /type` | body: text | Types into the open screen. |
-| `POST /click` | `?x=&y=&button=0` | Clicks the open screen at screenshot pixel coordinates. |
+| `POST /click` | `?x=&y=&button=0` | Moves the cursor to screenshot pixel coordinates in the open screen and clicks there. The cursor stays there, so later screenshots show that hover state. |
+| `POST /mouse` | `?x=&y=` | Moves the cursor in the open screen without clicking, to hover a widget for its tooltip. Coordinates outside the window, such as `?x=-1&y=-1`, park it so nothing is hovered. |
 | `POST /reload` | `?worktree=&full=` | What `devReload` calls after compiling. |
 
 Use `/command` to move and aim the player, for example

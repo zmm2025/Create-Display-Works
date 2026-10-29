@@ -51,7 +51,8 @@ capture demos. Endpoints are listed under "Agent control API" in DEVELOPMENT.md.
 
 
 - `/command` runs commands as the player.
-- `/use`, `/attack`, `/key`, `/type` and `/click` send input.
+- `/use`, `/attack`, `/key`, `/type` and `/click` send input. `/mouse` moves the cursor without clicking: hover a
+  widget to capture its tooltip, or park it at `x=-1&y=-1` so no hover state or tooltip covers a screenshot.
 - `/status` and `/screenshot` let you check the result. Open the PNG it returns to look at it.
 - For anything that moves or changes over time, such as animations, rotating parts, flip-dot transitions or media
   playback, capture a frame sequence with `/screenshot?frames=<n>&intervalMs=<ms>` and open the contact sheet it

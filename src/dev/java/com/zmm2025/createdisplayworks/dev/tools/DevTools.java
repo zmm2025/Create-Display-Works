@@ -9,6 +9,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.platform.Window;
 import com.zmm2025.createdisplayworks.CreateDisplayWorks;
+import com.zmm2025.createdisplayworks.dev.mixin.MouseHandlerAccessor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.KeyMapping;
@@ -526,15 +527,23 @@ public final class DevTools {
         });
     }
 
-    /** Clicks the open screen at screenshot pixel coordinates. */
-    static JsonObject click(double x, double y, int button) throws Exception {
+    /** Moves the cursor to screenshot pixel coordinates in the open screen, then clicks there unless {@code button} is null. */
+    static JsonObject click(double x, double y, Integer button) throws Exception {
         return onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
-            if(minecraft.screen == null) return failure("No screen is open to click.");
+            if(minecraft.screen == null) return failure("No screen is open to " + (button == null ? "move the mouse in." : "click."));
             Window window = minecraft.getWindow();
             double guiX = x * window.getGuiScaledWidth() / window.getWidth(), guiY = y * window.getGuiScaledHeight() / window.getHeight();
-            minecraft.screen.mouseClicked(guiX, guiY, button);
-            if(minecraft.screen != null) minecraft.screen.mouseReleased(guiX, guiY, button);
+            // A hidden window gets no cursor events, so screens would keep hovering wherever the cursor was left. The
+            // cursor is in window coordinates, which differ from screenshot pixels on high-DPI displays.
+            MouseHandlerAccessor mouse = (MouseHandlerAccessor)minecraft.mouseHandler;
+            mouse.createDisplayWorksDev$setXpos(x * window.getScreenWidth() / window.getWidth());
+            mouse.createDisplayWorksDev$setYpos(y * window.getScreenHeight() / window.getHeight());
+            minecraft.screen.mouseMoved(guiX, guiY);
+            if(button != null) {
+                minecraft.screen.mouseClicked(guiX, guiY, button);
+                if(minecraft.screen != null) minecraft.screen.mouseReleased(guiX, guiY, button);
+            }
             return ok();
         });
     }
