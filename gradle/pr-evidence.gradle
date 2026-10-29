@@ -1,0 +1,210 @@
+// PR evidence: screenshots, recordings and any other files that show what a branch changes. They're stored in git
+// under refs/pr-evidence/, outside every branch, and .github/workflows/pr-evidence.yml embeds them in the PR's Preview
+// section. See CONTRIBUTING.md.
+//
+//   ./gradlew prEvidence          uploads build/pr-evidence (PREVIEW.md plus its files) as this branch's evidence
+//   ./gradlew prEvidence -Pfetch  downloads this branch's current evidence into build/pr-evidence
+
+import groovy.json.JsonSlurper
+
+import java.util.concurrent.CompletableFuture
+import java.util.regex.Matcher
+
+abstract class PrEvidenceTask extends DefaultTask {
+    static final String PREVIEW = 'PREVIEW.md'
+    // GitHub rejects larger files in a push, and its drag-and-drop uploads stop at 10 MB on free plans.
+    static final long MAX_FILE_BYTES = 100L * 1024 * 1024
+    static final long DROP_WARN_BYTES = 10L * 1024 * 1024
+
+    @Input abstract Property<String> getCheckout()
+    @Input abstract Property<String> getFolder()
+    @Input abstract Property<Boolean> getFetch()
+
+    @TaskAction
+    void run() {
+        String branch = git(['symbolic-ref', '--quiet', '--short', 'HEAD']).trim()
+        if (!branch) throw new GradleException('PR EVIDENCE: ERROR - HEAD is detached; check out the PR branch first.')
+        String remote = remoteFor(branch)
+        String ref = "refs/pr-evidence/branches/${branch}"
+        File dir = new File(folder.get())
+        String current = remoteSha(remote, ref)
+        if (fetch.get()) {
+            download(dir, remote, ref, current, branch)
+        } else {
+            upload(dir, remote, ref, current, branch)
+        }
+    }
+
+    private void download(File dir, String remote, String ref, String current, String branch) {
+        if (!current) throw new GradleException("PR EVIDENCE: ERROR - ${branch} has no evidence on ${remote} yet.")
+        if (dir.exists() && dir.list()?.length) {
+            throw new GradleException("PR EVIDENCE: ERROR - ${dir} already has files. Delete it first, so nothing in it is lost.")
+        }
+        git(['fetch', '--no-tags', '--quiet', remote, ref])
+        int count = 0
+        git(['ls-tree', '-r', '-z', '--full-tree', current]).split('\u0000').findAll().each { String entry ->
+            String sha = entry.split(/\s+/)[2]
+            String path = entry.substring(entry.indexOf('\t') + 1)
+            File target = new File(dir, path)
+            target.parentFile.mkdirs()
+            target.bytes = gitBytes(['cat-file', 'blob', sha])
+            count++
+        }
+        logger.lifecycle("PR EVIDENCE: FETCHED - ${count} files from ${remote} (${current.take(10)}) into ${dir}.")
+    }
+
+    private void upload(File dir, String remote, String ref, String current, String branch) {
+        File preview = new File(dir, PREVIEW)
+        if (!preview.file) {
+            throw new GradleException("PR EVIDENCE: ERROR - ${preview} is missing. Put the files there with a ${PREVIEW} " +
+                    "that embeds them, or run with -Pfetch to start from this branch's current evidence.")
+        }
+        Map<String, File> files = [:]
+        dir.eachFileRecurse(groovy.io.FileType.FILES) { File file ->
+            files[dir.toPath().relativize(file.toPath()).toString().replace('\\', '/')] = file
+        }
+        files = files.sort()
+
+        String markdown = preview.getText('UTF-8')
+        Set<String> drops = matches(markdown, /<!--\s*drop:\s*(.+?)\s*-->/) as Set
+        Set<String> referenced = (localTargets(markdown) + drops) as Set
+        List<String> missing = referenced.findAll { !files.containsKey(it) }.sort()
+        if (missing) {
+            throw new GradleException("PR EVIDENCE: ERROR - ${PREVIEW} refers to files that aren't in ${dir}: ${missing.join(', ')}")
+        }
+        files.each { String path, File file ->
+            if (file.length() > MAX_FILE_BYTES) {
+                throw new GradleException("PR EVIDENCE: ERROR - ${path} is over 100 MB, which GitHub won't accept. Shorten or compress it.")
+            }
+            if (path in drops && file.length() > DROP_WARN_BYTES) {
+                logger.warn("${path} is over 10 MB, so GitHub may refuse it as a drag-and-drop upload on a free plan.")
+            }
+            if (path != PREVIEW && !(path in referenced)) {
+                logger.warn("${path} isn't used in ${PREVIEW}. It's still uploaded, and listed under the Preview's file link.")
+            }
+        }
+
+        File index = File.createTempFile('pr-evidence', '.index')
+        index.delete()
+        Map<String, String> env = [GIT_INDEX_FILE: index.absolutePath]
+        try {
+            List<String> paths = files.keySet() as List
+            // --no-filters stores each file's exact bytes, without line-ending conversion.
+            List<String> shas = git(['hash-object', '-w', '--no-filters', '--stdin-paths'], env,
+                    paths.collect { files[it].absolutePath }.join('\n') + '\n').readLines()
+            String indexInfo = paths.withIndex().collect { String path, int i -> "100644 ${shas[i]}\t${path}" }.join('\n') + '\n'
+            git(['update-index', '--add', '--index-info'], env, indexInfo)
+            String tree = git(['write-tree'], env).trim()
+            if (current) {
+                git(['fetch', '--no-tags', '--quiet', remote, ref])
+                if (git(['rev-parse', "${current}^{tree}"]).trim() == tree) {
+                    logger.lifecycle("PR EVIDENCE: NO CHANGES - ${remote} already has these files (${current.take(10)}).")
+                    return
+                }
+            }
+            List<String> args = ['commit-tree', tree, '-m', "PR evidence for ${branch}"]
+            if (current) args += ['-p', current]
+            String commit = git(args).trim()
+            git(['push', '--quiet', remote, "${commit}:${ref}"])
+            logger.lifecycle("PR EVIDENCE: UPLOADED - ${files.size()} files to ${ref} on ${remote} (${commit.take(10)}).")
+        } finally {
+            index.delete()
+        }
+        refreshOpenPr(branch)
+    }
+
+    // The workflow fills the Preview when a PR opens or gets new commits. If the PR is already open, ask it to run now.
+    private void refreshOpenPr(String branch) {
+        String json = tryRun(['gh', 'pr', 'view', branch, '--json', 'number,state'])
+        Map pr = json ? new JsonSlurper().parseText(json) as Map : null
+        if (pr?.state != 'OPEN') {
+            logger.lifecycle('The Preview section is filled in when the PR is opened.')
+            return
+        }
+        Map result
+        try {
+            result = exec(['gh', 'workflow', 'run', 'pr-evidence.yml', '-f', "pr=${pr.number}"], [:], null)
+        } catch (IOException e) {
+            result = [exit: 1, errors: e.message]
+        }
+        if (result.exit == 0) {
+            logger.lifecycle("PR #${pr.number}'s Preview section updates in a minute.")
+        } else {
+            logger.lifecycle("PR #${pr.number}'s Preview section updates on the branch's next push. The workflow couldn't " +
+                    "be started now: ${result.errors.toString().trim()}")
+        }
+    }
+
+    /** Paths in links, images and HTML src/href attributes that aren't URLs or anchors. */
+    static List<String> localTargets(String markdown) {
+        List<String> targets = matches(markdown, /\]\(\s*<([^>]+)>/) +
+                matches(markdown, /\]\(\s*([^)\s<]+)/) +
+                matches(markdown, /\b(?:src|href)\s*=\s*["']([^"']+)["']/)
+        return targets.findAll { !(it =~ /^([a-zA-Z][a-zA-Z0-9+.-]*:|#|\/)/) }.collect {
+            String path = it.replaceFirst(/^\.\//, '')
+            try { path = URLDecoder.decode(path.replace('+', '%2B'), 'UTF-8') } catch (IllegalArgumentException ignored) {}
+            return path
+        }
+    }
+
+    static List<String> matches(String text, String pattern) {
+        Matcher matcher = text =~ pattern
+        List<String> found = []
+        while (matcher.find()) found << matcher.group(1)
+        return found
+    }
+
+    private String remoteFor(String branch) {
+        for (String key : ["branch.${branch}.pushRemote", 'remote.pushDefault', "branch.${branch}.remote"]) {
+            String value = tryRun(['git', 'config', '--get', key])?.trim()
+            if (value && value != '.') return value
+        }
+        return 'origin'
+    }
+
+    private String remoteSha(String remote, String ref) {
+        String line = git(['ls-remote', remote, ref]).readLines().find { it.endsWith("\t${ref}") }
+        return line ? line.split('\t')[0] : null
+    }
+
+    private String git(List args, Map env = [:], String input = null) {
+        return new String(gitBytes(args, env, input), 'UTF-8')
+    }
+
+    private byte[] gitBytes(List args, Map env = [:], String input = null) {
+        Map result = exec(['git'] + args, env, input)
+        if (result.exit != 0) {
+            throw new GradleException("PR EVIDENCE: ERROR - git ${args[0]} failed: ${result.errors.trim()}")
+        }
+        return result.output as byte[]
+    }
+
+    /** Runs a command and returns its output, or null if it fails or isn't installed. */
+    private String tryRun(List command) {
+        try {
+            Map result = exec(command, [:], null)
+            return result.exit == 0 ? new String(result.output as byte[], 'UTF-8') : null
+        } catch (IOException ignored) {
+            return null
+        }
+    }
+
+    private Map exec(List command, Map env, String input) {
+        ProcessBuilder builder = new ProcessBuilder(command.collect { it.toString() }).directory(new File(checkout.get()))
+        env.each { key, value -> builder.environment().put(key.toString(), value.toString()) }
+        Process process = builder.start()
+        CompletableFuture<String> errors = CompletableFuture.supplyAsync { process.errorStream.getText('UTF-8') }
+        CompletableFuture<byte[]> output = CompletableFuture.supplyAsync { process.inputStream.bytes }
+        process.outputStream.withCloseable { if (input != null) it.write(input.getBytes('UTF-8')) }
+        int exit = process.waitFor()
+        return [exit: exit, output: output.get(), errors: errors.get()]
+    }
+}
+
+tasks.register('prEvidence', PrEvidenceTask) {
+    group = 'pr'
+    description = "Uploads build/pr-evidence as this branch's PR evidence (see CONTRIBUTING.md). -Pfetch downloads it instead."
+    checkout = projectDir.absolutePath
+    folder = layout.buildDirectory.dir('pr-evidence').get().asFile.absolutePath
+    fetch = providers.gradleProperty('fetch').present
+}

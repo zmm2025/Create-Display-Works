@@ -84,3 +84,27 @@ matching the work as the scope grows. Before a branch's first push, or before op
 with the full diff against `main`. If the name no longer describes the change, rename the branch locally with
 `git branch -m <type>/<short-description>` before pushing. Use the `feat/`, `fix/`, `docs/` or `chore/` prefix that
 fits the change. If the branch is already on GitHub, ask before renaming it there.
+
+## PR evidence
+
+The user opens PRs with T3 Code's **Commit, push & PR** button, at any point and without asking you first. The button
+writes the PR text but can't capture or upload anything. So whenever a branch changes something a player can see or
+hear, keep its evidence uploaded and current, as [CONTRIBUTING.md](CONTRIBUTING.md#pr-evidence) describes. A
+workflow then puts it in the PR's Preview section.
+
+- Before your first edit, capture the before state, while the game still runs the old code.
+- Pick whatever shows the change best, in any format:
+  - before and after screenshots for how something looks
+  - a GIF (`/screenshot?...&video=gif`) for short motion, since it plays inline
+  - an MP4 (`&video=mp4`) for longer or smoother motion, marked `<!-- drop: <file> -->`, since GitHub only plays
+    videos the user drags in
+  - links for anything else, such as changed sound files, `/sounds` or `/perf` output, or logs
+  - nothing, when there's nothing to see
+- The control API records no audio. If hearing a sound matters, say so in your reply, so the user can record it.
+- Copy the files you choose from the game's `screenshots/dev-tools/` into `build/pr-evidence/`, write its
+  `PREVIEW.md`, and run `./gradlew prEvidence` before your final reply. Rerun it whenever later work changes what the
+  evidence shows, and remove files that no longer apply.
+- If the evidence has drop files, add a short note before your closing line that lists them, linked to their files in
+  `build/pr-evidence/`, so the user can drag them into the PR once it's open.
+- Settle the branch name (see [Branch names](#branch-names)) before the first upload. After renaming the branch, run
+  `prEvidence` again.
