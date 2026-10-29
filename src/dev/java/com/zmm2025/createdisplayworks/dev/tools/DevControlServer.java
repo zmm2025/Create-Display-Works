@@ -22,7 +22,7 @@ final class DevControlServer {
     static int start(int port) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), port), 0);
         server.setExecutor(Executors.newSingleThreadExecutor(task -> {
-            Thread thread = new Thread(task, "CSoL Dev Control");
+            Thread thread = new Thread(task, "Display Works Dev Control");
             thread.setDaemon(true);
             return thread;
         }));

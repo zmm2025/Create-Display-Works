@@ -30,13 +30,13 @@ import java.util.concurrent.TimeUnit;
  * removed, deleting what's left of the worktree and its own game folder once it has exited.
  */
 final class DevInstance {
-    private static final Logger LOGGER = LoggerFactory.getLogger("CSoL Dev Tools");
+    private static final Logger LOGGER = LoggerFactory.getLogger("Display Works Dev Tools");
     /** Set for a game in a worktree, as opposed to the main checkout's game with the shared world. */
-    static final boolean WORKTREE_INSTANCE = Boolean.getBoolean("csol.dev.worktreeInstance");
-    private static final long IDLE_LIMIT_MS = TimeUnit.MINUTES.toMillis(Long.getLong("csol.dev.idleMinutes", 30));
+    static final boolean WORKTREE_INSTANCE = Boolean.getBoolean("createdisplayworks.dev.worktreeInstance");
+    private static final long IDLE_LIMIT_MS = TimeUnit.MINUTES.toMillis(Long.getLong("createdisplayworks.dev.idleMinutes", 30));
     /** The frame rate a hidden game draws at; nobody sees it, and it shouldn't slow down the user's own game. */
     private static final int HIDDEN_FPS = 30;
-    private static volatile boolean hidden = Boolean.getBoolean("csol.dev.hidden");
+    private static volatile boolean hidden = Boolean.getBoolean("createdisplayworks.dev.hidden");
     private static volatile long lastRequest = System.currentTimeMillis();
     private static boolean closing;
     private static int checkCount;
@@ -62,7 +62,7 @@ final class DevInstance {
             });
         }
         ScheduledExecutorService checks = Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread thread = new Thread(task, "CSoL Dev Instance");
+            Thread thread = new Thread(task, "Display Works Dev Instance");
             thread.setDaemon(true);
             return thread;
         });
@@ -195,7 +195,7 @@ final class DevInstance {
      */
     private static void startCleanup(Path worktree, Path gameDirectory) {
         try {
-            Path script = Files.createTempDirectory("csol-dev-cleanup").resolve("DevCleanup.java");
+            Path script = Files.createTempDirectory("createdisplayworks-dev-cleanup").resolve("DevCleanup.java");
             Files.writeString(script, CLEANUP, StandardCharsets.UTF_8);
             Path java = Path.of(ProcessHandle.current().info().command().orElse("java"));
             boolean windows = System.getProperty("os.name").startsWith("Windows");

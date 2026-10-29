@@ -99,17 +99,17 @@ neoForge.runs {
         taskBefore devAgentJar
         jvmArguments.add(devAgentJar.flatMap { it.archiveFile }.map { "-javaagent:${it.asFile.absolutePath}".toString() })
         if (devUseJbr) jvmArgument '-XX:+AllowEnhancedClassRedefinition'
-        systemProperty 'csol.dev.tools', 'true'
-        systemProperty 'csol.dev.world', devWorldName
+        systemProperty 'createdisplayworks.dev.tools', 'true'
+        systemProperty 'createdisplayworks.dev.world', devWorldName
         // Port 0 lets a worktree's game pick a free port; it records the port in dev-instance.json.
-        systemProperty 'csol.dev.controlPort', devIsWorktree ? '0' : devControlPort
-        systemProperty 'csol.dev.worktreeInstance', devIsWorktree.toString()
-        systemProperty 'csol.dev.hidden', devHidden.toString()
+        systemProperty 'createdisplayworks.dev.controlPort', devIsWorktree ? '0' : devControlPort
+        systemProperty 'createdisplayworks.dev.worktreeInstance', devIsWorktree.toString()
+        systemProperty 'createdisplayworks.dev.hidden', devHidden.toString()
         programArguments.addAll('--fml.mixinConfig', 'create_display_works_dev.mixins.json')
-        systemProperty 'csol.dev.worktree', devPath(projectDir)
-        systemProperty 'csol.dev.label', devLabel
-        systemProperty 'csol.dev.classRoots', classRoots
-        systemProperty 'csol.dev.resourceRoots', resourceRoots
+        systemProperty 'createdisplayworks.dev.worktree', devPath(projectDir)
+        systemProperty 'createdisplayworks.dev.label', devLabel
+        systemProperty 'createdisplayworks.dev.classRoots', classRoots
+        systemProperty 'createdisplayworks.dev.resourceRoots', resourceRoots
     }
 }
 
