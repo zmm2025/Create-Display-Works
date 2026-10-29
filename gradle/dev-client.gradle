@@ -1,19 +1,28 @@
 // Hot-reloading development client. See DEVELOPMENT.md for the workflow.
 //
-//   ./gradlew runDevClient   launches Minecraft (offline "Dev" player) straight into the shared test world
+//   ./gradlew runDevClient   launches this checkout's Minecraft (offline "Dev" player) straight into its test world, or
+//                            shows it and follows its log if it's already running
 //   ./gradlew devReload      compiles, then pushes code, assets and data into the running client
+//   ./gradlew devStart       for agents: starts this checkout's Minecraft hidden, in a T3 Code terminal when possible
 //
 // The in-game side lives in src/dev/java/.../dev/tools; the class-redefinition agent lives in src/devAgent.
 
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.net.http.WebSocket
 import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
 
 String devWorldName = 'Dev Testing World'
@@ -21,16 +30,20 @@ String devControlPort = providers.gradleProperty('devControlPort').getOrElse('25
 // JetBrains Runtime allows hot-swapping new methods, fields and classes; plain JDKs only allow edits to method bodies.
 boolean devUseJbr = providers.gradleProperty('devJbr').getOrElse('true').toBoolean()
 
-// Every worktree of this repository shares one game directory (and so one test world): the main checkout's run/.
-// Override with -PdevRunDir=<path> (or in ~/.gradle/gradle.properties).
-File devRunDir = providers.gradleProperty('devRunDir').map { new File(it) }.getOrElse({
-    String commonDir = providers.exec {
-        commandLine 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir'
-        ignoreExitValue = true
-    }.standardOutput.asText.get().trim()
-    File gitDir = commonDir ? new File(commonDir) : null
-    gitDir?.name == '.git' ? new File(gitDir.parentFile, 'run') : file('run')
-}())
+// The main checkout's run/ holds the shared game directory and test world. Override with -PdevRunDir=<path> (or in
+// ~/.gradle/gradle.properties).
+String devCommonDir = providers.exec {
+    commandLine 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir'
+    ignoreExitValue = true
+}.standardOutput.asText.get().trim()
+File devMainCheckout = devCommonDir && new File(devCommonDir).name == '.git' ? new File(devCommonDir).parentFile : null
+File devRunDir = providers.gradleProperty('devRunDir').map { new File(it) }.getOrElse(devMainCheckout ? new File(devMainCheckout, 'run') : file('run'))
+// Each worktree runs its own game in run/worktrees/<worktree>, with its own copy of the test world, so threads don't
+// share one game. The main checkout's game uses run/ itself and the fixed control port.
+boolean devIsWorktree = devMainCheckout != null && devMainCheckout.canonicalFile != projectDir.canonicalFile
+File devInstanceDir = devIsWorktree ? new File(devRunDir, "worktrees/${projectDir.name}") : devRunDir
+// -PdevHidden starts the window hidden; agents launch this way, through devStart.
+boolean devHidden = providers.gradleProperty('devHidden').present
 // Shown in the game's window title, so each client says which checkout it runs.
 String devBranch = providers.exec {
     commandLine 'git', 'rev-parse', '--abbrev-ref', 'HEAD'
@@ -82,13 +95,17 @@ neoForge.runs {
     devClient {
         client()
         ideName = 'Dev Client (hot reload)'
-        gameDirectory = devRunDir
+        gameDirectory = devInstanceDir
         taskBefore devAgentJar
         jvmArguments.add(devAgentJar.flatMap { it.archiveFile }.map { "-javaagent:${it.asFile.absolutePath}".toString() })
         if (devUseJbr) jvmArgument '-XX:+AllowEnhancedClassRedefinition'
         systemProperty 'createdisplayworks.dev.tools', 'true'
         systemProperty 'createdisplayworks.dev.world', devWorldName
-        systemProperty 'createdisplayworks.dev.controlPort', devControlPort
+        // Port 0 lets a worktree's game pick a free port; it records the port in dev-instance.json.
+        systemProperty 'createdisplayworks.dev.controlPort', devIsWorktree ? '0' : devControlPort
+        systemProperty 'createdisplayworks.dev.worktreeInstance', devIsWorktree.toString()
+        systemProperty 'createdisplayworks.dev.hidden', devHidden.toString()
+        programArguments.addAll('--fml.mixinConfig', 'create_display_works_dev.mixins.json')
         systemProperty 'createdisplayworks.dev.worktree', devPath(projectDir)
         systemProperty 'createdisplayworks.dev.label', devLabel
         systemProperty 'createdisplayworks.dev.classRoots', classRoots
@@ -98,15 +115,22 @@ neoForge.runs {
 
 tasks.matching { it.name == 'runDevClient' }.configureEach {
     group = 'dev'
-    description = "Launches Minecraft into '${devWorldName}' with hot reload and the agent control API."
+    description = "Launches this checkout's Minecraft into '${devWorldName}' with hot reload and the agent control API, or shows it if it's running."
     if (devUseJbr) {
         javaLauncher = javaToolchains.launcherFor {
             languageVersion = JavaLanguageVersion.of(21)
             vendor = JvmVendorSpec.JETBRAINS
         }
     }
-    doFirst { DevClientLauncher.requireNoRunningClient(devRunDir, devControlPort) }
-    doFirst { DevMods.sync(devModsSource, new File(devRunDir, 'mods'), devClasspathModIds, it.logger) }
+    File checkout = projectDir
+    // One action, because each doFirst runs before the ones declared above it.
+    doFirst {
+        DevInstances.removeOrphans(devRunDir, it.logger)
+        DevClientLauncher.showIfRunning(devInstanceDir, devHidden, it.logger)
+        if (devIsWorktree) DevInstances.prepare(devRunDir, devInstanceDir, checkout, devWorldName, devControlPort, it.logger)
+        DevInstances.setLoadingWindow(devInstanceDir, !devHidden)
+        DevMods.sync(devModsSource, new File(devInstanceDir, 'mods'), devClasspathModIds, it.logger)
+    }
 }
 
 class DevMods {
@@ -163,22 +187,16 @@ class DevMods {
     }
 }
 
-class DevClientLauncher {
-    /** Only one dev client runs at a time, because every worktree shares one game directory and test world. */
-    static void requireNoRunningClient(File runDir, String port) {
-        if (!lockHeld(new File(runDir, 'dev-client.lock'))) return
-        String owner = 'another worktree'
-        try {
-            String status = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status"))
-                    .timeout(Duration.ofSeconds(5)).build(), HttpResponse.BodyHandlers.ofString()).body()
-            owner = (new JsonSlurper().parseText(status) as Map).worktree ?: owner
-        } catch (Exception ignored) {
-            // Keep the generic description.
-        }
-        throw new GradleException("A dev client is already running from ${owner}. Close it before launching another.")
-    }
+class DevInstances {
+    /** Names the worktree a game folder belongs to, so the folder can be deleted once that worktree is gone. */
+    static final String OWNER = 'dev-worktree.txt'
+    /** What a worktree's game copies from the main game folder besides the test world. */
+    static final List<String> COPIED = ['options.txt', 'config', 'defaultconfigs', 'emi.json', 'resourcepacks', 'schematics',
+                                        'usercache.json', 'usernamecache.json']
 
-    private static boolean lockHeld(File lock) {
+    /** Whether a game is running in this folder; the game holds the lock until it exits. */
+    static boolean running(File gameDir) {
+        File lock = new File(gameDir, 'dev-client.lock')
         if (!lock.exists()) return false
         try (FileChannel channel = FileChannel.open(lock.toPath(), StandardOpenOption.WRITE)) {
             def held = channel.tryLock()
@@ -189,10 +207,260 @@ class DevClientLauncher {
             return true
         }
     }
+
+    /** The control API port and process of the game running in this folder, as the game recorded them. */
+    static Map info(File gameDir) {
+        File file = new File(gameDir, 'dev-instance.json')
+        try {
+            return file.exists() ? new JsonSlurper().parse(file) as Map : null
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    static String post(Object port, String path, String body) {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}${path}"))
+                .timeout(Duration.ofSeconds(30)).POST(HttpRequest.BodyPublishers.ofString(body)).build()
+        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build().send(request, HttpResponse.BodyHandlers.ofString()).body()
+    }
+
+    /**
+     * Deletes the game folders of worktrees that no longer exist, and anything left of the worktrees themselves. Running
+     * games normally do this already (see DevInstance); this catches what they missed.
+     */
+    static void removeOrphans(File runDir, Logger logger) {
+        new File(runDir, 'worktrees').listFiles()?.findAll { it.isDirectory() }?.each { File dir ->
+            File owner = new File(dir, OWNER)
+            if (!owner.exists()) return
+            File worktree = new File(owner.text.trim())
+            if (new File(worktree, '.git').exists() || running(dir)) return
+            if (worktree.isDirectory() && worktree.deleteDir()) logger.lifecycle("Dev client: finished deleting removed worktree ${worktree}")
+            if (dir.deleteDir()) logger.lifecycle("Dev client: deleted the game folder of removed worktree ${worktree.name}")
+        }
+    }
+
+    /** Gives a worktree's game copies of the main test world and settings the first time it launches. */
+    static void prepare(File runDir, File gameDir, File worktree, String worldName, String mainPort, Logger logger) {
+        gameDir.mkdirs()
+        new File(gameDir, OWNER).text = worktree.absolutePath
+        File world = new File(gameDir, "saves/${worldName}")
+        if (world.exists()) return
+        if (running(runDir)) {
+            // Write the main game's unsaved changes to disk first, so the copy has them.
+            try {
+                post(info(runDir)?.port ?: mainPort, '/command', 'save-all flush')
+            } catch (Exception e) {
+                logger.lifecycle("Dev client: couldn't save the main game first (${e.message}); copying the world as it is on disk")
+            }
+        }
+        COPIED.each { copy(new File(runDir, it), new File(gameDir, it)) }
+        copy(new File(runDir, "saves/${worldName}"), world)
+        logger.lifecycle("Dev client: copied '${worldName}' and settings from ${runDir} for this worktree")
+    }
+
+    private static void copy(File source, File target) {
+        if (!source.exists()) return
+        Files.walk(source.toPath()).withCloseable { paths ->
+            paths.forEach { path ->
+                // session.lock belongs to whichever game has the world open.
+                if (path.fileName.toString() == 'session.lock') return
+                def destination = target.toPath().resolve(source.toPath().relativize(path).toString())
+                if (Files.isDirectory(path)) Files.createDirectories(destination)
+                else Files.copy(path, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES)
+            }
+        }
+    }
+
+    /** NeoForge's loading window shows itself, so a hidden launch turns it off. */
+    static void setLoadingWindow(File gameDir, boolean enabled) {
+        File config = new File(gameDir, 'config/fml.toml')
+        String line = "earlyWindowControl = ${enabled}"
+        if (!config.exists()) {
+            if (enabled) return
+            config.parentFile.mkdirs()
+            config.text = line + '\n'
+            return
+        }
+        String text = config.text
+        String updated = text =~ /(?m)^earlyWindowControl\s*=.*$/ ? text.replaceFirst(/(?m)^earlyWindowControl\s*=.*$/, line) : line + '\n' + text
+        if (updated != text) config.text = updated
+    }
+}
+
+class DevClientLauncher {
+    /**
+     * Each checkout runs one game. If it's already running, shows its window and follows its log until the game closes,
+     * instead of launching another. A hidden launch (an agent's) just leaves it running.
+     */
+    static void showIfRunning(File gameDir, boolean hidden, Logger logger) {
+        if (!DevInstances.running(gameDir)) {
+            // Left by a game that has exited; the next game writes a fresh one.
+            new File(gameDir, 'dev-instance.json').delete()
+            return
+        }
+        def port = DevInstances.info(gameDir)?.port
+        if (hidden) {
+            logger.lifecycle("Minecraft is already running for this checkout (control API on port ${port}).")
+            throw new StopExecutionException()
+        }
+        try {
+            DevInstances.post(port, '/window?show=true', '')
+        } catch (Exception e) {
+            logger.lifecycle("Couldn't show the running game's window: ${e.message}")
+        }
+        logger.lifecycle('Minecraft is already running for this checkout, so its window is shown now. Following its log; ' +
+                'stopping this leaves the game running.')
+        follow(new File(gameDir, 'logs/latest.log'), gameDir)
+        logger.lifecycle('Minecraft has closed.')
+        throw new StopExecutionException()
+    }
+
+    private static void follow(File log, File gameDir) {
+        long position = Math.max(0, log.length() - 4000)
+        boolean partialLine = position > 0
+        while (DevInstances.running(gameDir)) {
+            long length = log.length()
+            if (length < position) position = 0
+            if (length > position) {
+                byte[] bytes = new byte[(int) (length - position)]
+                new RandomAccessFile(log, 'r').withCloseable { it.seek(position); it.readFully(bytes) }
+                position = length
+                String text = new String(bytes, 'UTF-8')
+                if (partialLine) {
+                    text = text.substring(text.indexOf('\n') + 1)
+                    partialLine = false
+                }
+                System.out.print(text)
+                System.out.flush()
+            }
+            Thread.sleep(250)
+        }
+    }
+}
+
+/** Opens a terminal in a T3 Code thread and runs a command in it, so the user can watch and stop what an agent started. */
+class DevT3Terminal {
+    static boolean run(String cli, File t3Home, String threadId, String terminalId, File cwd, String command, Logger logger) {
+        Map session = null
+        try {
+            Map runtime = new JsonSlurper().parse(new File(t3Home, 'userdata/server-runtime.json')) as Map
+            session = new JsonSlurper().parseText(exec([cli, 'auth', 'session', 'issue', '--scope', 'terminal:operate',
+                                                        '--ttl', '5m', '--label', 'Minecraft dev client', '--json'])) as Map
+            Map<String, CompletableFuture<Map>> replies = ['0': new CompletableFuture<Map>(), '1': new CompletableFuture<Map>()]
+            StringBuilder partial = new StringBuilder()
+            WebSocket.Listener listener = new WebSocket.Listener() {
+                @Override
+                CompletionStage<?> onText(WebSocket socket, CharSequence data, boolean last) {
+                    partial.append(data)
+                    if (last) {
+                        Map message = new JsonSlurper().parseText(partial.toString()) as Map
+                        partial.setLength(0)
+                        if (message._tag == 'Exit') replies[message.requestId as String]?.complete(message.exit as Map)
+                    }
+                    socket.request(1)
+                    return null
+                }
+            }
+            URI uri = URI.create(runtime.origin.toString().replaceFirst('^http', 'ws') + '/ws?orchestrationProtocol=2&clientSurface=cli')
+            WebSocket socket = HttpClient.newHttpClient().newWebSocketBuilder().header('Authorization', "Bearer ${session.token}")
+                    .buildAsync(uri, listener).get(10, TimeUnit.SECONDS)
+            try {
+                request(socket, replies, '0', 'terminal.open', [threadId: threadId, terminalId: terminalId, cwd: cwd.absolutePath, cols: 120, rows: 30])
+                request(socket, replies, '1', 'terminal.write', [threadId: threadId, terminalId: terminalId, data: command + '\r'])
+            } finally {
+                socket.sendClose(WebSocket.NORMAL_CLOSURE, '')
+            }
+            return true
+        } catch (Exception e) {
+            logger.lifecycle("Couldn't open a T3 Code terminal: ${e.message}")
+            return false
+        } finally {
+            if (session?.sessionId) {
+                try {
+                    exec([cli, 'auth', 'session', 'revoke', session.sessionId.toString()])
+                } catch (Exception ignored) {
+                    // It expires in 5 minutes anyway.
+                }
+            }
+        }
+    }
+
+    private static void request(WebSocket socket, Map<String, CompletableFuture<Map>> replies, String id, String method, Map payload) {
+        socket.sendText(JsonOutput.toJson([_tag: 'Request', id: id, tag: method, payload: payload, headers: []]), true).get(10, TimeUnit.SECONDS)
+        Map exit = replies[id].get(15, TimeUnit.SECONDS)
+        if (exit._tag != 'Success') throw new IOException("${method} failed: ${JsonOutput.toJson(exit)}")
+    }
+
+    private static String exec(List<String> command) {
+        Process process = new ProcessBuilder(command).start()
+        process.outputStream.close()
+        CompletableFuture<String> errors = CompletableFuture.supplyAsync { process.errorStream.getText('UTF-8') }
+        String output = process.inputStream.getText('UTF-8')
+        if (!process.waitFor(60, TimeUnit.SECONDS) || process.exitValue() != 0) {
+            throw new IOException("t3 ${command[1..3].join(' ')} failed: ${errors.get().trim()}")
+        }
+        return output
+    }
+}
+
+abstract class DevStartTask extends DefaultTask {
+    @Input abstract Property<String> getGameDirectory()
+    @Input abstract Property<String> getCheckout()
+    @Input @Optional abstract Property<String> getThreadId()
+    @Input @Optional abstract Property<String> getT3Cli()
+    @Input abstract Property<String> getT3Home()
+
+    DevStartTask() {
+        outputs.upToDateWhen { false }
+    }
+
+    @TaskAction
+    void start() {
+        File gameDir = new File(gameDirectory.get())
+        File checkoutDir = new File(checkout.get())
+        if (!DevInstances.running(gameDir)) {
+            new File(gameDir, 'dev-instance.json').delete()
+            boolean inTerminal = threadId.present && t3Cli.present && DevT3Terminal.run(t3Cli.get(), new File(t3Home.get()), threadId.get(),
+                    'minecraft', checkoutDir, './gradlew runDevClient -PdevHidden', logger)
+            if (inTerminal) {
+                logger.lifecycle("Starting Minecraft hidden in this thread's 'minecraft' terminal in T3 Code.")
+            } else {
+                // Without T3 Code, run it in the background and keep its output in a log file.
+                File log = new File(gameDir, 'logs/dev-start.log')
+                log.parentFile.mkdirs()
+                String gradlew = System.getProperty('os.name').toLowerCase().contains('windows') ? 'gradlew.bat' : 'gradlew'
+                new ProcessBuilder(new File(checkoutDir, gradlew).absolutePath, 'runDevClient', '-PdevHidden')
+                        .directory(checkoutDir).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.to(log)).start()
+                logger.lifecycle("Starting Minecraft hidden in the background; its output goes to ${log}.")
+            }
+        }
+        // Wait until the game has joined its world, so the agent can drive it right away.
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            def port = DevInstances.running(gameDir) ? DevInstances.info(gameDir)?.port : null
+            if (port != null) {
+                try {
+                    Map status = new JsonSlurper().parseText(HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status"))
+                            .timeout(Duration.ofSeconds(5)).build(), HttpResponse.BodyHandlers.ofString()).body()) as Map
+                    if (status.world != null && status.player != null) {
+                        logger.lifecycle("DEV CLIENT READY - control API on http://127.0.0.1:${port} (world '${status.world}', ${status.hidden ? 'hidden' : 'visible'})")
+                        return
+                    }
+                } catch (Exception ignored) {
+                    // Still loading.
+                }
+            }
+            Thread.sleep(1000)
+        }
+        throw new GradleException('Minecraft did not finish loading within 5 minutes; check its terminal or log.')
+    }
 }
 
 abstract class DevReloadTask extends DefaultTask {
-    @Input abstract Property<String> getPort()
+    @Input abstract Property<String> getGameDirectory()
+    @Input abstract Property<String> getRunDirectory()
+    /** The main checkout's fixed port, for a game that didn't record its port; empty in a worktree. */
+    @Input abstract Property<String> getDefaultPort()
     @Input abstract Property<String> getWorktree()
     @Input abstract Property<Boolean> getFull()
 
@@ -202,8 +470,15 @@ abstract class DevReloadTask extends DefaultTask {
 
     @TaskAction
     void reload() {
+        DevInstances.removeOrphans(new File(runDirectory.get()), logger)
+        File gameDir = new File(gameDirectory.get())
+        def port = DevInstances.running(gameDir) ? (DevInstances.info(gameDir)?.port ?: defaultPort.get() ?: null) : null
+        if (port == null) {
+            logger.lifecycle('DEV RELOAD: NO SESSION - no dev client is running for this checkout; start one with ./gradlew runDevClient')
+            return
+        }
         String query = "worktree=${URLEncoder.encode(worktree.get(), 'UTF-8')}&full=${full.get()}"
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port.get()}/reload?${query}"))
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/reload?${query}"))
                 .timeout(Duration.ofMinutes(3))
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build()
@@ -225,9 +500,23 @@ abstract class DevReloadTask extends DefaultTask {
 
 tasks.register('devReload', DevReloadTask) {
     group = 'dev'
-    description = 'Compiles and hot-reloads code, assets and data into the running dev client. -Pfull reloads everything.'
+    description = "Compiles and hot-reloads code, assets and data into this checkout's running dev client. -Pfull reloads everything."
     dependsOn 'classes', 'devClasses'
-    port = devControlPort
+    gameDirectory = devInstanceDir.absolutePath
+    runDirectory = devRunDir.absolutePath
+    defaultPort = devIsWorktree ? '' : devControlPort
     worktree = projectDir.absolutePath
     full = providers.gradleProperty('full').present
+}
+
+tasks.register('devStart', DevStartTask) {
+    group = 'dev'
+    description = "For agents: starts this checkout's dev client hidden (in a T3 Code terminal with -PthreadId=<id>) and waits until it's in its world."
+    // Compile first, so build errors show up here instead of in a terminal nobody is watching.
+    dependsOn 'classes', 'devClasses'
+    gameDirectory = devInstanceDir.absolutePath
+    checkout = projectDir.absolutePath
+    threadId = providers.gradleProperty('threadId')
+    t3Cli = providers.environmentVariable('T3CODE_CLI_PATH')
+    t3Home = providers.environmentVariable('T3CODE_HOME').orElse(new File(System.getProperty('user.home'), '.t3').absolutePath)
 }
