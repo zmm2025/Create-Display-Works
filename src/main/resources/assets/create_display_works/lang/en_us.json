@@ -15,6 +15,7 @@
   "tooltip.create_display_works.flip_dot_display": "Tileable 8 x 8 dots. Rotation controls flip duration; silent video runs at up to 10 FPS.",
   "screen.create_display_works.media": "Flip-Dot Display",
   "message.create_display_works.media_loaded": "Imported %s frames. Turn the cogs to play.",
+  "message.create_display_works.media_loaded_image": "Imported the image. Turn the cogs to show it.",
   "create_display_works.ponder.flip_dot_media.header": "Images, video and pixel drawings",
   "create_display_works.ponder.flip_dot_media.text_0": "Right-click with an empty hand. Enter a media URL, public YouTube video or local file, import a preview, then apply it.",
   "create_display_works.ponder.flip_dot_media.text_1": "Import images or silent animations up to 100 MB and 60 seconds at 10 FPS. Choose stretch, fit or fill; adjust threshold, inversion and dithering.",
