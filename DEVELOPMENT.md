@@ -184,6 +184,12 @@ Screenshots capture the frames the game renders. That works while the window is 
 Minecraft stops rendering while its window is minimized, so `/screenshot` times out then. Commands and input still
 work. A worktree's game hides instead of minimizing for this reason.
 
+## PR evidence
+
+`./gradlew prEvidence` uploads `build/pr-evidence/` as the branch's PR evidence: screenshots, recordings and other
+files that a workflow embeds in the PR's Preview section. [CONTRIBUTING.md](CONTRIBUTING.md#pr-evidence) explains it.
+The control API's `/screenshot` makes the images, GIFs and MP4s.
+
 ## Release testing with standard Java
 
 JetBrains Runtime and every dev tool are limited to the `runDevClient` run and the `dev`/`devAgent` source sets. None

@@ -33,3 +33,5 @@ All items are subject to change or removal without notice.
 
 ## 🧑‍💻 Development
 See [DEVELOPMENT.md](DEVELOPMENT.md) for the hot-reloading dev client, the shared test world and the agent control API.
+
+To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md), which also covers the screenshots and recordings PRs need.
