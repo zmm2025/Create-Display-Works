@@ -29,7 +29,8 @@ All items are subject to change or removal without notice.
 - Multi-source display targets
 
 ### Integrations & Compatibility 🔀
-- Create Aeronautics compatibility
+- [Create Aeronautics](https://modrinth.com/mod/create-aeronautics) compatibility
+- [Horizon](https://playhorizon.dev) support
 
 ## 🧑‍💻 Development
 See [DEVELOPMENT.md](DEVELOPMENT.md) for the hot-reloading dev client, the shared test world and the agent control API.
