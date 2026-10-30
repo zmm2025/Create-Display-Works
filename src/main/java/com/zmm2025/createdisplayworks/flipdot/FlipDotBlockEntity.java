@@ -10,6 +10,7 @@ import net.minecraft.nbt.*;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.state.BlockState;
 import com.zmm2025.createdisplayworks.media.MediaClip;
+import com.zmm2025.createdisplayworks.media.MediaStore;
 
 public class FlipDotBlockEntity extends KineticBlockEntity {
     public static java.util.function.Consumer<FlipDotBlockEntity> clientTick=be->{};
@@ -34,6 +35,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     private FlipDotAssembly assembly;
     private long lastAssemblyScan = Long.MIN_VALUE / 2;
     private MediaClip media;
+    /** The {@link MediaStore} id of {@link #media}, or null if it couldn't be stored and has to be saved inline. */
+    private String mediaId;
     private int mediaFrame;
     private boolean mediaPlaying, mediaLoop=true;
 
@@ -134,18 +137,24 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public void installMedia(MediaClip clip) {
         var group=assembly();if(group==null||group.width()!=clip.columns()||group.height()!=clip.rows())return;
         for(var tile:group.tiles()){tile.clearMedia();tile.assembly=group;}
-        media=clip;mediaFrame=0;mediaPlaying=clip.count()>1;mediaLoop=true;playbackDelay=0;
+        media=clip;mediaId=MediaStore.save(level.getServer(),clip);claimMedia();mediaFrame=0;mediaPlaying=clip.count()>1;mediaLoop=true;playbackDelay=0;
         // A still image is an ordinary latest target, including while unpowered.
         queueMediaFrame(group,clip.frame(0));
         setChanged();
     }
+    private void claimMedia(){if(mediaId!=null && level instanceof net.minecraft.server.level.ServerLevel server)MediaStore.claim(server,worldPosition,mediaId);}
+    private void releaseMedia(){if(mediaId!=null && level instanceof net.minecraft.server.level.ServerLevel server)MediaStore.release(server,worldPosition,mediaId);}
+    // Boards loaded from disk get their level after reading their data, and copies made with /clone read it afterwards.
+    @Override public void setLevel(net.minecraft.world.level.Level level){super.setLevel(level);claimMedia();}
+    @Override public void destroy(){super.destroy();releaseMedia();}
     public boolean isMediaPlaying(){return media!=null && mediaPlaying && wasPowered;}
-    public void clearMedia(){com.zmm2025.createdisplayworks.media.MediaLimits.release(this);media=null;mediaFrame=0;mediaPlaying=false;setChanged();}
+    public void clearMedia(){com.zmm2025.createdisplayworks.media.MediaLimits.release(this);releaseMedia();media=null;mediaId=null;mediaFrame=0;mediaPlaying=false;setChanged();}
     public void mediaControl(String action) {
         switch(action){case "play" -> mediaPlaying=true;case "pause" -> mediaPlaying=false;case "restart" -> {mediaFrame=0;playbackDelay=0;mediaPlaying=true;}case "loop" -> mediaLoop=!mediaLoop;default -> {return;}}
         setChanged();sendData();
     }
     public MediaClip mediaForEditing(){return media;}
+    public String mediaId(){return mediaId;}
     public String mediaFilename(){return media==null?"":media.filename();}
     public long[] mediaThumbnail(){return media==null?new long[0]:media.frame(0);}
     public int mediaFrameCount(){return media==null?0:media.count();}
@@ -219,6 +228,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public int movingDiscs(float partial) { return motion.moving(level.getGameTime()+partial); }
     public float discSpeed() { return motion.speed(); }
     public float angle(int index,float partial) { return motion.angle(index,level.getGameTime()+partial); }
+    public boolean discsSettled(float partial) { return motion.settled(level.getGameTime()+partial); }
+    public int motionVersion() { return motion.version(); }
     /**
      * Update packets are built in the server tick after a flip starts, and they reach the client later still. A 256 RPM
      * flip lasts one tick, so replaying it on the server's clock would show it already finished. Up to
@@ -257,7 +268,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         if(knownController!=null)tag.putLong("KnownController",knownController.asLong());
         tag.putLongArray("KnownMembers",knownMembers);
         tag.putString("RowText", rowText); tag.putBoolean("HasText", hasText); tag.putBoolean("BitmapMode", bitmapMode);
-        if(!clientPacket && media!=null){tag.putByteArray("MediaArchive",media.archive());tag.putInt("MediaFrame",mediaFrame);tag.putBoolean("MediaPlaying",mediaPlaying);tag.putBoolean("MediaLoop",mediaLoop);}
+        if(!clientPacket && media!=null){if(mediaId!=null)tag.putString("MediaId",mediaId);else tag.putByteArray("MediaArchive",media.archive());tag.putInt("MediaFrame",mediaFrame);tag.putBoolean("MediaPlaying",mediaPlaying);tag.putBoolean("MediaLoop",mediaLoop);}
     }
     @Override protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
@@ -275,6 +286,11 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         if(knownMembers.length>256)knownMembers=new long[0];
         restoreClock=!clientPacket;wasPowered=tag.getBoolean("WasPowered");playbackDelay=Math.clamp(tag.getInt("PlaybackDelay"),0,20/MediaClip.FPS);
         String text = tag.getString("RowText"); rowText = text.substring(0, Math.min(512, text.length())); hasText = tag.getBoolean("HasText"); bitmapMode = tag.getBoolean("BitmapMode");
-        if(!clientPacket){media=null;if(tag.contains("MediaArchive"))try{media=MediaClip.fromArchive(tag.getByteArray("MediaArchive"));mediaFrame=Math.floorMod(tag.getInt("MediaFrame"),media.count());mediaPlaying=tag.getBoolean("MediaPlaying");mediaLoop=tag.getBoolean("MediaLoop");}catch(IllegalArgumentException ignored){mediaPlaying=false;}}
+        if(!clientPacket){media=null;mediaId=null;
+            // Older saves, and boards whose clip couldn't be stored, keep the clip inline. It moves to the store on load.
+            if(tag.contains("MediaId")){mediaId=tag.getString("MediaId");media=MediaStore.load(mediaId);if(media==null)mediaId=null;}
+            else if(tag.contains("MediaArchive"))try{media=MediaClip.fromArchive(tag.getByteArray("MediaArchive"));var server=net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();if(server!=null)mediaId=MediaStore.save(server,media);}catch(IllegalArgumentException ignored){}
+            claimMedia();
+            if(media!=null){mediaFrame=Math.floorMod(tag.getInt("MediaFrame"),media.count());mediaPlaying=tag.getBoolean("MediaPlaying");mediaLoop=tag.getBoolean("MediaLoop");}else mediaPlaying=false;}
     }
 }

@@ -10,17 +10,21 @@ import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Quaternionf;
 
+/**
+ * Draws flip-dot displays where Flywheel can't, such as with Flywheel's backend off, under a shader pack without
+ * Flywheel support, and in Ponder scenes. Otherwise {@link FlipDotVisual} draws them and this renderer doesn't run.
+ */
 public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEntity> {
-    private static final ResourceLocation WHITE = ResourceLocation.fromNamespaceAndPath("create_display_works", "textures/block/disc.png");
-    private static final float[][][] PLATES = {
+    static final ResourceLocation WHITE = ResourceLocation.fromNamespaceAndPath("create_display_works", "textures/block/disc.png");
+    static final float[][][] PLATES = {
         geometry(-.5625f,.5625f,-.8125f,-.5625f), geometry(-.8125f,.8125f,-.5625f,.5625f), geometry(-.5625f,.5625f,.5625f,.8125f)
     };
-    private static final float[][] NORMALS = {{0,0,-1},{0,0,1},{-1,0,0},{1,0,0},{0,1,0},{0,-1,0}};
+    static final float[][] NORMALS = {{0,0,-1},{0,0,1},{-1,0,0},{1,0,0},{0,1,0},{0,-1,0}};
+    static final int EDGE = 0x2F3130;
     private final Quaternionf rotation = new Quaternionf();
     public FlipDotRenderer(BlockEntityRendererProvider.Context context) { super(context); }
     @Override protected void renderSafe(FlipDotBlockEntity be, float partial, PoseStack pose, MultiBufferSource buffers, int light, int overlay) {
         be.startClientMotion(partial);
-        // This block uses its BER even when Flywheel is active; no duplicate visual is registered.
         renderRotatingBuffer(be, CachedBuffers.partialFacingVertical(AllPartialModels.SHAFTLESS_COGWHEEL,
             be.getBlockState(), be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING)), pose, buffers.getBuffer(RenderType.solid()), light);
         pose.pushPose();
@@ -30,7 +34,7 @@ public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEnti
         VertexConsumer vertices = buffers.getBuffer(RenderType.entityCutout(WHITE));
         for (int row = 0; row < 8; row++) for (int col = 0; col < 8; col++)
             disc(be, pose, vertices, row, col, be.angle(row * 8 + col, partial), 255, 6, light, overlay);
-        if (DiscMotionBlur.enabled()) DiscMotionBlur.render(this, be, partial, pose, buffers.getBuffer(RenderType.entityTranslucent(WHITE)), light, overlay);
+        if (DiscMotionBlur.active(be, partial)) DiscMotionBlur.render(this, be, partial, pose, buffers.getBuffer(RenderType.entityTranslucent(WHITE)), light, overlay);
         pose.popPose();
     }
     /** Draws the first {@code faces} faces of each plate: front and back come first, then the four thin edges. */
@@ -40,7 +44,7 @@ public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEnti
         pose.mulPose(rotation.rotationAxis((float)Math.toRadians(angle), .70710677f, .70710677f, 0));
         for (float[][] plate : PLATES) for (int face = 0; face < faces; face++) {
             float[] normal = NORMALS[face];
-            quad(pose,vertices,plate[face],normal[0],normal[1],normal[2],face==0?be.discColor():face==1?be.backColor():0x2F3130,alpha,light,overlay);
+            quad(pose,vertices,plate[face],normal[0],normal[1],normal[2],face==0?be.discColor():face==1?be.backColor():EDGE,alpha,light,overlay);
         }
         pose.popPose();
     }
