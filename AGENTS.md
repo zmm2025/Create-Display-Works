@@ -6,27 +6,50 @@ yours to use. [DEVELOPMENT.md](DEVELOPMENT.md) explains the setup.
 
 ## When you finish a turn
 
-Once all of a turn's changes under `src/` are complete, run `./gradlew devReload` from this worktree as the last
-step before your final reply, even if you think nothing loaded at runtime changed. Run it once, not after
-intermediate edits: if you're still going to change code, or the build or tests fail and you're fixing them, wait.
-Then end your reply with one short line that matches the result:
+If the turn changed anything under `src/`, run `./gradlew devReload` from this worktree once, as the last step
+before your final reply. Don't run it after intermediate edits: if you're still going to change code, or the build
+or tests fail and you're fixing them, wait. Skip it when nothing under `src/` changed.
 
-| `devReload` output | Closing line |
+### The closing line
+
+A closing line tells the user what they have to do to see this turn's change in their own game. Write it from what
+actually happened, not from `devReload`'s status alone, and leave it out when it wouldn't help:
+
+- **Nothing to try in-game:** answers, research, plans, docs, README, CI or Gradle tasks that don't change the game,
+  and dev tooling the user doesn't play with. End the reply normally. Don't add a reload line, and don't explain
+  that you skipped `devReload`.
+- **Whose game it is:** `devReload` ends with `[window shown]` or `[window hidden: ...]`. A shown window is a game the
+  user is looking at. A hidden one is the game you started with `devStart`, or one the user minimized. Either way the
+  user isn't running it, so never call it "your Minecraft client", and never ask the user to reload or restart it.
+- **Fresh games:** if a game started after your edits, `devReload` prints `NO CHANGES` because the game already loaded
+  them. That doesn't mean there's nothing new to see.
+
+Pick the line that fits, then adjust the wording to the change:
+
+| Situation | Closing line |
 | --- | --- |
-| `DEV RELOAD: RELOADED` | ✅ **Your Minecraft client has been reloaded.** |
-| `DEV RELOAD: NO CHANGES` | ✅ **No reload or restart needed.** |
-| `DEV RELOAD: NO SESSION` | 🚀 **Launch Minecraft to try these changes.** |
-| `DEV RELOAD: RESTART REQUIRED` | ⚠️ **Restart Minecraft to try these changes.** followed by the reasons it printed, in plain words and not in bold. |
+| Window shown, change reloaded | ✅ **Your Minecraft client has been reloaded.** |
+| Window shown, game needs a restart | ⚠️ **Restart Minecraft to try these changes.** followed by the reason in plain words, not in bold. |
+| Window shown, game started after your edits | Usually none; the user's game already shows the change. |
+| Window hidden, or no game running | 🚀 **Launch Minecraft to try these changes.** It shows a hidden game, or starts one. |
 | `DEV RELOAD: ERROR` | Explain what went wrong. |
 
-`devReload` can't see every restart-only change. Use the restart line, with the reason in plain words, even if it
-printed `RELOADED`, when you:
+If a hidden game needs a restart, restart it yourself before you reply (close its `minecraft` terminal and run
+`devStart` again), so **Launch Minecraft** doesn't show the user old code. If you can't, say so in plain words
+instead of asking the user to restart a game they never opened.
+
+When the user's game and your test game differ, say where each stands, for example that you tested it in this
+worktree's hidden game but the main checkout's game needs a restart once it's merged. Don't let the closing line
+contradict the rest of the reply.
+
+`devReload` can't see every restart-only change. Treat the game as needing a restart, even if it printed `RELOADED`,
+when you:
 
 - register anything new: blocks, items, block entities, menus, entities, sounds, data components, creative tabs or
   network payloads
 - change code that only runs during startup, setup or registration events, such as renderer, model, key mapping,
   config spec or Ponder registration
-- change mixins, mod metadata, Gradle files or dependencies
+- change mixins, mod metadata, dependencies, or Gradle settings the game launches with
 
 If hot-swapped code only affects new objects or newly opened screens, tell the user to re-place the block or reopen
 the screen.
