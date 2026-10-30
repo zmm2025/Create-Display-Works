@@ -13,6 +13,9 @@ public final class ClientEvents {
     }
     @SubscribeEvent public static void setup(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent event) {
         com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity.clientTick=com.zmm2025.createdisplayworks.flipdot.DiscRattle::update;
+        // With Flywheel active, the visual replaces FlipDotRenderer entirely.
+        event.enqueueWork(() -> dev.engine_room.flywheel.lib.visualization.SimpleBlockEntityVisualizer.builder(ModContent.FLIP_DOT_ENTITY.get())
+            .factory(com.zmm2025.createdisplayworks.flipdot.FlipDotVisual::new).apply());
         net.neoforged.fml.ModList.get().getModContainerById(CreateDisplayWorks.MOD_ID).ifPresent(mod->mod.registerExtensionPoint(
             net.neoforged.neoforge.client.gui.IConfigScreenFactory.class,net.neoforged.neoforge.client.gui.ConfigurationScreen::new));
         net.createmod.ponder.foundation.PonderIndex.addPlugin(new com.zmm2025.createdisplayworks.ponder.DisplayWorksPonderPlugin());
