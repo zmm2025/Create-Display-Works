@@ -73,7 +73,7 @@ public final class DevTools {
     private static final String WORKTREE = System.getProperty("createdisplayworks.dev.worktree", "");
     /** Created as soon as the mod's event subscribers load, so the baseline matches the classes the game loaded. */
     private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("createdisplayworks.dev.classRoots"), paths("createdisplayworks.dev.resourceRoots")) : null;
-    private static final String RELOADED = "Your Minecraft client has been reloaded.";
+    private static final String RELOADED = "Reloaded the changes.";
     private static volatile PendingScreenshot screenshot;
     /** Encodes and saves screenshot frames off the render thread, so a sequence doesn't stall the frames it captures. */
     private static final ExecutorService SCREENSHOT_WRITERS = Executors.newFixedThreadPool(Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 6), task -> {
@@ -220,7 +220,7 @@ public final class DevTools {
             message = "Restart Minecraft to try these changes.";
         } else if(result.changes().isEmpty() && !full) {
             status = "no-changes";
-            message = "No reload or restart needed.";
+            message = "The game already runs this code.";
         } else {
             status = "reloaded";
             message = RELOADED;

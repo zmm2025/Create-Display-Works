@@ -24,8 +24,8 @@ themselves only call the Gradle tasks above, so their behaviour lives in the rep
 | Launch Minecraft | `./gradlew runDevClient` | play |
 | Reload Minecraft | `./gradlew devReload` | build |
 
-Agents run `devReload` at the end of each turn (see [AGENTS.md](AGENTS.md)), so the **Reload Minecraft** button
-is only a manual fallback. It replaces both F3+T and `/reload`.
+Agents run `devReload` at the end of each turn that changes `src/` (see [AGENTS.md](AGENTS.md)), so the
+**Reload Minecraft** button is only a manual fallback. It replaces both F3+T and `/reload`.
 
 The client runs inside a Gradle daemon, so `./gradlew --stop` closes every running dev client without saving.
 
@@ -104,7 +104,9 @@ when you join.
 - **Assets** (`assets/`): textures, models, sounds and lang files reload client-side (F3+T).
 - **Data** (`data/`): recipes, tags, loot tables and advancements reload server-side (`/reload`).
 
-It also reports edits that need a restart and exits non-zero (`DEV RELOAD: RESTART REQUIRED`) when it finds:
+Its result line ends with `[window shown]` or `[window hidden: ...]`, so agents can tell a game you're looking at
+from a hidden one they started. It also reports edits that need a restart and exits non-zero
+(`DEV RELOAD: RESTART REQUIRED`) when it finds:
 
 - changed static initializers
 - added or removed `@SubscribeEvent` handlers
