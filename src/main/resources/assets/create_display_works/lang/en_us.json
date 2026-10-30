@@ -14,6 +14,7 @@
   "message.create_display_works.invalid_pixels": "Drawing does not fit. Use # for light dots and . or spaces for dark dots.",
   "tooltip.create_display_works.flip_dot_display": "Tileable 8 x 8 dots. Rotation controls flip duration; silent video runs at up to 10 FPS.",
   "screen.create_display_works.media": "Flip-Dot Display",
+  "screen.create_display_works.media.error.not_found": "File not found. Check the path.",
   "message.create_display_works.media_loaded": "Imported %s frames. Turn the cogs to play.",
   "message.create_display_works.media_loaded_image": "Imported the image. Turn the cogs to show it.",
   "create_display_works.ponder.flip_dot_media.header": "Images, video and pixel drawings",
