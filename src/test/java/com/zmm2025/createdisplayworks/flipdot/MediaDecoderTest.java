@@ -22,6 +22,10 @@ class MediaDecoderTest {
         var clip=MediaDecoder.decode("https://www.youtube.com/watch?v=FtutLA63Cp8",1,1,2,128,false,Path.of("build/media-import-test"),System.out::println);
         assertEquals(20,clip.count());
     }
+    @Test void missingLocalFileIsReportedAsNotFound(){
+        var error=assertThrows(MediaImportException.class,()->MediaDecoder.decode(Path.of("build/media-import-test/missing.png").toAbsolutePath().toString(),1,1,2,128,false,Path.of("build/media-import-test"),s->{}));
+        assertEquals(MediaImportException.Reason.NOT_FOUND,error.reason());
+    }
     @Test void clipBoundsRejectMalformedUploads(){
         assertThrows(IllegalArgumentException.class,()->new MediaClip(0,1,new long[1]));
         assertThrows(IllegalArgumentException.class,()->new MediaClip(32,32,new long[1024]));

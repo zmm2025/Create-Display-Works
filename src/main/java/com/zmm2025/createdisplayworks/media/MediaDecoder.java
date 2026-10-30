@@ -43,7 +43,8 @@ public final class MediaDecoder {
                 if(response.statusCode()!=200)throw new IOException("Download returned HTTP "+response.statusCode());
                 byte[] buffer=new byte[16384];long total=0;long deadline=System.nanoTime()+Duration.ofSeconds(90).toNanos();
                 for(int n;(n=input.read(buffer))!=-1;) {
-                    if((total+=n)>MAX_BYTES || System.nanoTime()>deadline)throw new IOException("Media exceeds 100 MB or the download time limit.");
+                    if((total+=n)>MAX_BYTES)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"Media exceeds 100 MB.");
+                    if(System.nanoTime()>deadline)throw new MediaImportException(MediaImportException.Reason.TIMED_OUT,"Media exceeds the download time limit.");
                     if(Thread.currentThread().isInterrupted())throw new InterruptedIOException();
                     output.write(buffer,0,n);
                 }
@@ -92,7 +93,12 @@ public final class MediaDecoder {
             status.accept("Loading media...");
             if(YouTubeImport.matches(source)) YouTubeImport.download(source,seconds,cache,temp,input,decoder(cache,status),status);
             else if(source.startsWith("https://") || source.startsWith("http://"))download(URI.create(source),input);
-            else {Path file=Path.of(source);if(!Files.isRegularFile(file)||Files.size(file)>MAX_BYTES)throw new IOException("Choose a media file smaller than 100 MB.");Files.copy(file,input);}
+            else {
+                Path file=Path.of(source);
+                if(!Files.isRegularFile(file))throw new MediaImportException(MediaImportException.Reason.NOT_FOUND,"No media file exists at "+file);
+                if(Files.size(file)>MAX_BYTES)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"Choose a media file smaller than 100 MB.");
+                Files.copy(file,input);
+            }
             Path executable=decoder(cache,status);status.accept("Converting to "+columns*8+" x "+rows*8+" dots...");
             int w=columns*8,h=rows*8;
             byte[] header;try(var in=Files.newInputStream(input)){header=in.readNBytes(65536);}
