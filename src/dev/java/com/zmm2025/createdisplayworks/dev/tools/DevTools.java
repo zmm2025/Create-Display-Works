@@ -505,14 +505,27 @@ public final class DevTools {
     }
 
     /** Presses a key (GLFW name such as {@code escape}, {@code e}, {@code enter}) in the open screen, or as a game keybind. */
-    static JsonObject key(String name) throws Exception {
+    /** {@code mods} lists held modifiers, such as {@code shortcut} (Cmd on macOS, Ctrl elsewhere), {@code shift}, {@code alt}. */
+    static JsonObject key(String name, String mods) throws Exception {
         InputConstants.Key key = InputConstants.getKey("key.keyboard." + name.toLowerCase(Locale.ROOT));
         if(key == InputConstants.UNKNOWN) return failure("Unknown key " + name + "; use GLFW names like escape, enter, e, left.shift, f3.");
+        int modifiers = 0;
+        for(String mod : mods == null || mods.isBlank() ? new String[0] : mods.toLowerCase(Locale.ROOT).split(",")) {
+            switch(mod.strip()) {
+                case "shortcut" -> modifiers |= Minecraft.ON_OSX ? org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER : org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+                case "ctrl", "control" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+                case "super", "cmd" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER;
+                case "shift" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT;
+                case "alt" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_ALT;
+                default -> { return failure("Unknown modifier " + mod + "; use shortcut, ctrl, super, shift or alt."); }
+            }
+        }
+        int held = modifiers;
         return onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
             if(minecraft.screen != null) {
-                minecraft.screen.keyPressed(key.getValue(), 0, 0);
-                if(minecraft.screen != null) minecraft.screen.keyReleased(key.getValue(), 0, 0);
+                minecraft.screen.keyPressed(key.getValue(), 0, held);
+                if(minecraft.screen != null) minecraft.screen.keyReleased(key.getValue(), 0, held);
             } else KeyMapping.click(key);
             return ok();
         });
