@@ -56,5 +56,9 @@ public record MediaClip(int columns, int rows, long[] frames, String filename, E
             return new MediaClip(w,h,clip.frames,name,source,settings);
         }catch(java.io.IOException e){throw new IllegalArgumentException("Invalid media archive",e);}
     }
+    /** The same clip with its editable source shrunk to what this board can show. */
+    public MediaClip withCompactSource(){var compact=editable==null?null:editable.compactFor(columns,rows);return compact==editable?this:new MediaClip(columns,rows,frames,filename,compact,settings);}
+    /** The same clip without its editable source, for holding playback only. */
+    public MediaClip withoutSource(){return editable==null?this:new MediaClip(columns,rows,frames,filename,null,settings);}
     public long[] frame(int index){int size=columns*rows;return Arrays.copyOfRange(frames,index*size,(index+1)*size);}
 }

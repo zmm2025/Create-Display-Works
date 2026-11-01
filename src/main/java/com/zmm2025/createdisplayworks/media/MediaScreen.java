@@ -175,7 +175,7 @@ public final class MediaScreen extends AbstractSimiScreen {
         if(!part.pos().equals(pos)||fresh||busy||part.columns()!=columns||part.rows()!=rows||part.total()<1||part.total()>EditableMedia.MAX_BYTES||part.offset()<0||part.offset()>part.total()-part.data().length)return;
         if(part.offset()==0){incoming=new byte[part.total()];received=0;}
         if(incoming==null||incoming.length!=part.total()||received!=part.offset())return;
-        System.arraycopy(part.data(),0,incoming,received,part.data().length);received+=part.data().length;
+        System.arraycopy(part.data(),0,incoming,received,part.data().length);received+=part.data().length;PacketDistributor.sendToServer(new MediaNetwork.Ack(pos,received));
         if(received==incoming.length){
             byte[] archive=incoming;incoming=null;busy=true;status="Loading media";syncControls();
             job=WORKER.submit(()->{

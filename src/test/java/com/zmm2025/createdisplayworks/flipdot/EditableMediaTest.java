@@ -33,6 +33,33 @@ class EditableMediaTest {
         var fill=source.frame(pixels,0,1,1,new MediaSettings(128,false,false,MediaDecoder.Scale.FILL,60));
         assertEquals(0,fit[0]&0xFFFF00000000FFFFL,"Fit has back-color padding");assertNotEquals(fit[0],fill[0]);
     }
+    @Test void sourcesShrinkToTwiceTheBoardsDotsAndNoFurther(){
+        assertArrayEquals(new int[]{22,16},EditableMedia.compactSize(147,110,1,1),"Fill on 8x8 dots still samples two pixels per dot");
+        assertArrayEquals(new int[]{64,37},EditableMedia.compactSize(170,96,4,2));
+        assertArrayEquals(new int[]{147,110},EditableMedia.compactSize(147,110,16,8),"Large boards keep the whole source");
+        var wide=EditableMedia.compactSize(170,96,1,4);
+        assertTrue(wide[0]>=16&&wide[1]>=64,"Tall boards keep enough height");
+    }
+    @Test void shrinkingKeepsFramesAndIsStable(){
+        byte[] pixels=new byte[160*90*3*2];
+        for(int i=0;i<pixels.length;i+=2){pixels[i]=(byte)(i*7);pixels[i+1]=(byte)255;}
+        var full=EditableMedia.fromPixels(160,90,pixels);var small=full.compactFor(1,1);
+        assertEquals(3,small.count());assertEquals(29,small.width());assertEquals(16,small.height());
+        assertSame(small,small.compactFor(1,1),"Already-shrunk sources are left alone");
+        assertSame(full,full.compactFor(16,16));
+        byte[] alpha=small.pixels();for(int i=1;i<alpha.length;i+=2)assertEquals((byte)255,alpha[i],"Opaque sources stay opaque");
+        assertEquals(small.width(),EditableMedia.fromPixels(160,90,pixels,1,1).width());
+    }
+    @Test void storedClipsKeepPlaybackAndSettings(){
+        var settings=new MediaSettings(91,true,true,MediaDecoder.Scale.FILL,1);
+        byte[] pixels=new byte[160*80*10*2];java.util.Arrays.fill(pixels,(byte)200);
+        var clip=EditableMedia.fromPixels(160,80,pixels).render(1,1,"wide.mp4",settings);
+        var compact=clip.withCompactSource();
+        assertArrayEquals(clip.frames(),compact.frames());assertEquals(settings,compact.settings());assertEquals(32,compact.editable().width());
+        assertSame(compact,compact.withCompactSource());
+        var restored=MediaClip.fromArchive(compact.archive());assertEquals(32,restored.editable().width());
+        assertNull(compact.withoutSource().editable());assertArrayEquals(clip.frames(),compact.withoutSource().frames());
+    }
     @Test void corruptAndOversizedSourcesAreRejected(){
         assertThrows(IllegalArgumentException.class,()->new EditableMedia(256,256,1,new byte[1]));
         assertThrows(IllegalArgumentException.class,()->new EditableMedia(16,8,601,new byte[1]));
