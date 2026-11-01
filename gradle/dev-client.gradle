@@ -487,14 +487,28 @@ abstract class DevReloadTask extends DefaultTask {
             response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
                     .send(request, HttpResponse.BodyHandlers.ofString())
         } catch (ConnectException ignored) {
-            logger.lifecycle('DEV RELOAD: NO SESSION - Launch Minecraft to try these changes.')
+            logger.lifecycle('DEV RELOAD: NO SESSION - no dev client is running for this checkout.')
             return
         }
         Map result = new JsonSlurper().parseText(response.body()) as Map
         (result.details as List)?.each { logger.lifecycle("  ${it}") }
-        String line = "DEV RELOAD: ${result.status.toString().toUpperCase().replace('-', ' ')} - ${result.message}"
+        String line = "DEV RELOAD: ${result.status.toString().toUpperCase().replace('-', ' ')} - ${result.message} ${windowState(port)}"
         if (result.status in ['reloaded', 'no-changes']) logger.lifecycle(line)
         else throw new GradleException(line)
+    }
+
+    /**
+     * Whether someone can see the game. A hidden one was started by an agent with devStart, or minimized, so the user
+     * isn't looking at it, and agents word their closing line differently (see AGENTS.md).
+     */
+    private static String windowState(Object port) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status")).timeout(Duration.ofSeconds(5)).build()
+            Map status = new JsonSlurper().parseText(HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()).body()) as Map
+            return status.hidden ? '[window hidden: the user is not looking at this game]' : '[window shown]'
+        } catch (Exception ignored) {
+            return '[window state unknown]'
+        }
     }
 }
 

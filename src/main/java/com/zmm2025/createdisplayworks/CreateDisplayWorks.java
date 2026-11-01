@@ -13,6 +13,7 @@ public final class CreateDisplayWorks
     public CreateDisplayWorks(IEventBus bus, net.neoforged.fml.ModContainer container) {
         ModContent.register(bus);
         com.zmm2025.createdisplayworks.media.MediaNetwork.registerLifecycle();
+        com.zmm2025.createdisplayworks.media.MediaStore.registerLifecycle();
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER,com.zmm2025.createdisplayworks.media.MediaLimits.SPEC);
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.CLIENT,ClientConfig.SPEC);
         bus.addListener(this::setup);

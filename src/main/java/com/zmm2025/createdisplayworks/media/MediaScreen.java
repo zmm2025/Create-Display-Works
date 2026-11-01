@@ -131,7 +131,7 @@ public final class MediaScreen extends AbstractSimiScreen {
             var filters=stack.mallocPointer(extensions.length);for(String extension:extensions)filters.put(stack.UTF8(extension));filters.flip();
             String chosen=org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_openFileDialog("Choose display media","",filters,"Images and videos",false);
             if(chosen!=null){setSource(chosen);importPreview();}
-        }catch(Exception e){showError("Unable to open the file chooser");syncControls();}
+        }catch(Exception e){showError(e);syncControls();}
     }
     private void control(String action){PacketDistributor.sendToServer(new MediaNetwork.Control(pos,action));}
     public void importPreview(){
@@ -143,13 +143,14 @@ public final class MediaScreen extends AbstractSimiScreen {
                 var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"),s->{});
                 byte[] pixels=clip.editable()==null?null:clip.editable().pixels();
                 minecraft.execute(()->{if(minecraft.screen!=this)return;preview=clip;original=clip.editable();originalPixels=pixels;fresh=true;dirty=false;busy=false;playing=true;previewTicks=0;status="Ready";init();setFocused(null);syncControls();});
-            }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception.getMessage());syncControls();});}
+            }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception);syncControls();});}
         });
     }
-    private void showError(String detail){
-        String message=detail==null?"":detail.toLowerCase(Locale.ROOT);
+    private void showError(Exception error){
+        String message=error.getMessage()==null?"":error.getMessage().toLowerCase(Locale.ROOT);
+        var reason=error instanceof MediaImportException known?known.reason():null;
         status="Unable to load";
-        errorDetail=message.contains("100 mb")?"Choose a file smaller than 100 MB.":message.contains("timed out")||message.contains("time limit")?"Loading took too long. Try again.":message.contains("youtube")?"Use a public, recorded YouTube video.":"Check the link or file, then try again.";
+        errorDetail=reason==MediaImportException.Reason.NOT_FOUND?Component.translatable("screen.create_display_works.media.error.not_found").getString():reason==MediaImportException.Reason.TOO_LARGE?"Choose a file smaller than 100 MB.":reason==MediaImportException.Reason.TIMED_OUT?"Loading took too long. Try again.":message.contains("youtube")?"Use a public, recorded YouTube video.":"Check the link or file, then try again.";
     }
     public void applyPreview(){
         if(busy||saving||!confirm.active)return;
@@ -159,7 +160,7 @@ public final class MediaScreen extends AbstractSimiScreen {
         job=WORKER.submit(()->{
             try{var rendered=sourceMedia==null?current:sourceMedia.render(columns,rows,current.filename(),selected);
                 minecraft.execute(()->{if(minecraft.screen==this)MediaNetwork.upload(pos,rendered);});
-            }catch(Exception e){minecraft.execute(()->{saving=false;showError(e.getMessage());syncControls();});}
+            }catch(Exception e){minecraft.execute(()->{saving=false;showError(e);syncControls();});}
         });
     }
     public void updateStatus(MediaNetwork.Status update){
@@ -185,7 +186,7 @@ public final class MediaScreen extends AbstractSimiScreen {
                         cutoff=settings.threshold();invert=settings.invert();dither=settings.dither();scale=settings.scale();seconds=settings.seconds();
                         busy=false;dirty=false;status=original==null?"Reimport to edit":"On display";init();syncControls();
                     });
-                }catch(Exception e){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(e.getMessage());syncControls();});}
+                }catch(Exception e){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(e);syncControls();});}
             });
         }
     }
