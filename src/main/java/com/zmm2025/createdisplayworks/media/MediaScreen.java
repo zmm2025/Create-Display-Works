@@ -11,6 +11,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -57,14 +58,14 @@ public final class MediaScreen extends AbstractSimiScreen {
         source=new EditBox(font,guiLeft+32,guiTop+31,142,12,text("Media source")) {
             @Override public void renderWidget(GuiGraphics g,int mouseX,int mouseY,float partial){
                 if(preview!=null&&!isFocused()&&!dirty)g.drawString(font,font.plainSubstrByWidth(preview.filename(),getWidth()),getX(),getY()+2,0xF3EBDE,false);
-                else if(getValue().isEmpty())g.drawString(font,"Paste a media link",getX(),getY()+2,0xD8D8D8,false);
+                else if(getValue().isEmpty())g.drawString(font,"Paste media or a link",getX(),getY()+2,0xD8D8D8,false);
                 else super.renderWidget(g,mouseX,mouseY,partial);
             }
         };
         source.setBordered(false);source.setTextColor(0xF3EBDE);source.setMaxLength(2048);
-        source.setHint(text("Paste a media link"));source.setValue(sourceValue);
+        source.setHint(text("Paste media or a link"));source.setValue(sourceValue);
         source.setResponder(value->{sourceValue=value;dirty=true;errorDetail="";status="Load media";syncControls();});
-        source.setTooltip(Tooltip.create(text("Image, video or YouTube link. You can also paste a file path, or drop a file onto this screen.")));
+        source.setTooltip(Tooltip.create(text("Image, video or YouTube link. You can also paste a copied image, file or file path, or drop a file onto this screen.")));
         addRenderableWidget(source);
         load=icon(178,27,AllIcons.I_MTD_SCAN,"Load media","Read the source and preview it on the dots.",this::importPreview);
         file=icon(205,27,AllIcons.I_OPEN_FOLDER,"Choose file","Open an image or video from this computer.",this::chooseFile);
@@ -196,7 +197,34 @@ public final class MediaScreen extends AbstractSimiScreen {
     public boolean previewReady(){return fresh&&preview!=null&&!busy&&!dirty;}
     public String importStatus(){return status;}
     @Override public void onFilesDrop(List<java.nio.file.Path> paths){if(!paths.isEmpty()&&!busy&&!saving){setSource(paths.getFirst().toString());importPreview();}}
-    @Override public boolean keyPressed(int key,int scan,int modifiers){if((key==257||key==335)&&source.isFocused()){importPreview();return true;}return super.keyPressed(key,scan,modifiers);}
+    @Override public boolean keyPressed(int key,int scan,int modifiers){
+        if((key==257||key==335)&&source.isFocused()){importPreview();return true;}
+        if(isPaste(key,modifiers)&&!busy&&!saving&&pasteMedia())return true;
+        return super.keyPressed(key,scan,modifiers);
+    }
+    /** Cmd+V on macOS, Ctrl+V elsewhere, read from the event's modifiers like the rest of this key event. */
+    private static boolean isPaste(int key,int modifiers){
+        int shortcut=net.minecraft.client.Minecraft.ON_OSX?org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER:org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+        return key==org.lwjgl.glfw.GLFW.GLFW_KEY_V&&(modifiers&(shortcut|org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT|org.lwjgl.glfw.GLFW.GLFW_MOD_ALT))==shortcut;
+    }
+    /** Loads a copied image or file. Copied text still pastes into the source box, or loads directly when the box isn't focused. */
+    private boolean pasteMedia(){
+        ClipboardMedia.Copied copied;
+        try{copied=ClipboardMedia.read();}catch(Exception e){showError(e);syncControls();return true;}
+        if(copied==null){
+            String text=minecraft.keyboardHandler.getClipboard().strip();
+            if(source.isFocused()||text.isEmpty()||text.contains("\n"))return false;
+            setSource(text);importPreview();return true;
+        }
+        if(copied.file()!=null){setSource(copied.file().toString());importPreview();return true;}
+        busy=true;status="Loading media";errorDetail="";syncControls();
+        Path folder=minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache/clipboard");
+        job=WORKER.submit(()->{
+            try{Path file=copied.save(folder);minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;setSource(file.toString());importPreview();});}
+            catch(Exception e){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(e);syncControls();});}
+        });
+        return true;
+    }
     @Override public void tick(){
         super.tick();
         if(editorRetryTicks>0&&--editorRetryTicks==0&&original==null&&!fresh&&!busy)control("edit");

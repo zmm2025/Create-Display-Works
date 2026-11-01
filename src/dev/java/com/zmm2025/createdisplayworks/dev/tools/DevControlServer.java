@@ -52,7 +52,7 @@ final class DevControlServer {
                 case "/blockentity" -> DevInspect.blockEntity(query);
                 case "/use" -> DevTools.interact(true, query);
                 case "/attack" -> DevTools.interact(false, query);
-                case "/key" -> DevTools.key(query.getOrDefault("key", body.strip()));
+                case "/key" -> DevTools.key(query.getOrDefault("key", body.strip()), query.get("mods"));
                 case "/type" -> DevTools.type(body.isEmpty() ? query.getOrDefault("text", "") : body);
                 case "/click" -> DevTools.click(Double.parseDouble(query.get("x")), Double.parseDouble(query.get("y")), Integer.parseInt(query.getOrDefault("button", "0")));
                 case "/mouse" -> DevTools.click(Double.parseDouble(query.get("x")), Double.parseDouble(query.get("y")), null);
