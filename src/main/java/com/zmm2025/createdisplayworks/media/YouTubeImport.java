@@ -32,7 +32,7 @@ final class YouTubeImport {
             } else Files.copy(archive,exe,StandardCopyOption.REPLACE_EXISTING);
             if(!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")&&!exe.toFile().setExecutable(true))throw new IOException("Cannot run YouTube helper.");
             Files.writeString(root.resolve("verified"),actual);return exe;
-        }finally{Files.deleteIfExists(archive);}
+        }finally{MediaDecoder.deleteTree(archive);}
     }
     private static void run(List<String> command,Path temp,Path output,Path ffmpeg) throws Exception {
         Path errors=temp.resolve("youtube-errors.txt");

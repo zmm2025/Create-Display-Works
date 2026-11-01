@@ -41,8 +41,9 @@ public final class MediaStore {
         });
     }
     /** Writes the clip if it isn't stored yet and returns its id, or null if it couldn't be written. */
-    public static String save(MinecraftServer server,MediaClip clip) {
-        byte[] bytes=clip.archive();
+    public static String save(MinecraftServer server,MediaClip clip) {return save(server,clip.archive());}
+    /** Like {@link #save(MinecraftServer,MediaClip)}, for an archive that's already built. */
+    public static String save(MinecraftServer server,byte[] bytes) {
         String id;
         try{id=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes),0,16);}
         catch(NoSuchAlgorithmException e){throw new IllegalStateException(e);}
@@ -60,12 +61,18 @@ public final class MediaStore {
     }
     /** Returns the stored clip, or null if the id is invalid or its file is missing or damaged. */
     public static MediaClip load(String id) {
+        byte[] bytes=read(id);if(bytes==null)return null;
+        try{return MediaClip.fromArchive(bytes);}
+        catch(IllegalArgumentException e){LogUtils.getLogger().error("Unable to read flip-dot media {}",id,e);return null;}
+    }
+    /** Returns the stored archive's bytes, or null if the id is invalid or its file is missing or unreadable. */
+    public static byte[] read(String id) {
         MinecraftServer server=ServerLifecycleHooks.getCurrentServer();
         if(server==null||!ID.matcher(id).matches())return null;
         Path file=file(server,id);
-        try{return MediaClip.fromArchive(Files.readAllBytes(file));}
+        try{return Files.readAllBytes(file);}
         catch(NoSuchFileException e){LogUtils.getLogger().warn("Flip-dot media {} is missing",file);return null;}
-        catch(IOException|IllegalArgumentException e){LogUtils.getLogger().error("Unable to read flip-dot media {}",file,e);return null;}
+        catch(IOException e){LogUtils.getLogger().error("Unable to read flip-dot media {}",file,e);return null;}
     }
     /** Records that the board at this position shows the clip. Claiming again is harmless. */
     public static void claim(ServerLevel level,BlockPos pos,String id) {

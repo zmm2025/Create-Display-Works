@@ -21,15 +21,20 @@ public final class MediaNetwork {
     private static final Map<UUID,Upload> UPLOADS=new HashMap<>();
     private static final Map<UUID,Long> EDIT_REQUESTS=new HashMap<>();
     private static final Map<UUID,Long> IMPORT_REQUESTS=new HashMap<>();
+    private static final Map<UUID,Transfer> TRANSFERS=new HashMap<>();
+    private static final int PART_BYTES=16384, WINDOW_BYTES=16*PART_BYTES;
+    private static final long TRANSFER_IDLE_NANOS=30_000_000_000L;
     public static void registerLifecycle(){
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent e)->{
-            UUID id=e.getEntity().getUUID();UPLOADS.remove(id);EDIT_REQUESTS.remove(id);IMPORT_REQUESTS.remove(id);
+            UUID id=e.getEntity().getUUID();UPLOADS.remove(id);EDIT_REQUESTS.remove(id);IMPORT_REQUESTS.remove(id);TRANSFERS.remove(id);
         });
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStoppedEvent e)->{
-            UPLOADS.clear();EDIT_REQUESTS.clear();IMPORT_REQUESTS.clear();
+            UPLOADS.clear();EDIT_REQUESTS.clear();IMPORT_REQUESTS.clear();TRANSFERS.clear();
         });
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.tick.ServerTickEvent.Post e)->{
-            if(e.getServer().getTickCount()%20==0)UPLOADS.values().removeIf(u->u.expires<System.nanoTime());
+            if(e.getServer().getTickCount()%20==0){
+                long now=System.nanoTime();UPLOADS.values().removeIf(u->u.expires<now);TRANSFERS.values().removeIf(t->now-t.touched>TRANSFER_IDLE_NANOS);
+            }
         });
     }
     private static boolean allow(Map<UUID,Long> requests,ServerPlayer player){
@@ -65,20 +70,43 @@ public final class MediaNetwork {
         public static final StreamCodec<RegistryFriendlyByteBuf,Status> CODEC=StreamCodec.of((b,p)->{b.writeBlockPos(p.pos);b.writeUtf(p.message,256);b.writeBoolean(p.loop);b.writeVarInt(p.frames);b.writeBoolean(p.playing);},b->new Status(b.readBlockPos(),b.readUtf(256),b.readBoolean(),b.readVarInt(),b.readBoolean()));
         public Type<Status> type(){return TYPE;}
     }
+    /** The client confirms how much of an editor transfer it has stored, which lets the server send more. */
+    public record Ack(BlockPos pos,int received) implements CustomPacketPayload {
+        public static final Type<Ack> TYPE=MediaNetwork.type("media_ack");
+        public static final StreamCodec<RegistryFriendlyByteBuf,Ack> CODEC=StreamCodec.of((b,p)->{b.writeBlockPos(p.pos);b.writeVarInt(p.received);},b->new Ack(b.readBlockPos(),b.readVarInt()));
+        public Type<Ack> type(){return TYPE;}
+    }
+    /**
+     * An editor transfer to one player. At most {@link #WINDOW_BYTES} wait in the connection unconfirmed, so a client
+     * that stops reading can't make the server queue whole archives. A new request replaces the old transfer, so a
+     * lost confirmation never blocks the editor; an abandoned one expires.
+     */
+    private static final class Transfer {
+        final BlockPos pos;final int w,h;final byte[] data;int sent,acked;long touched=System.nanoTime();
+        Transfer(BlockPos pos,int w,int h,byte[] data){this.pos=pos;this.w=w;this.h=h;this.data=data;}
+    }
     private static final class Upload {
         final BlockPos pos;final net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension;final int w,h;final byte[] data;final long expires;int received;
         Upload(Part p,ServerPlayer player){pos=p.pos;dimension=player.level().dimension();w=p.columns;h=p.rows;data=new byte[p.total];expires=System.nanoTime()+60_000_000_000L;}
     }
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar=event.registrar("5");
+        var registrar=event.registrar("6");
         registrar.playToClient(Open.TYPE,Open.CODEC,(p,c)->openScreen.accept(p));
         registrar.playToClient(Status.TYPE,Status.CODEC,(p,c)->updateScreen.accept(p));
         registrar.playBidirectional(Part.TYPE,Part.CODEC,(p,c)->{if(c.player() instanceof ServerPlayer player)receive(p,player);else receiveEditor.accept(p);});
+        registrar.playToServer(Ack.TYPE,Ack.CODEC,(p,c)->{
+            var transfer=TRANSFERS.get(c.player().getUUID());
+            if(transfer==null||!transfer.pos.equals(p.pos)||p.received<=transfer.acked||p.received>transfer.sent)return;
+            transfer.acked=p.received;transfer.touched=System.nanoTime();
+            if(transfer.acked==transfer.data.length)TRANSFERS.remove(c.player().getUUID());else pump(transfer,(ServerPlayer)c.player());
+        });
         registrar.playToServer(Control.TYPE,Control.CODEC,(p,c)->{
             var be=editable((ServerPlayer)c.player(),p.pos);if(be==null)return;var group=be.assembly();if(group==null)return;
             if(p.action.equals("edit")){if(!allow(EDIT_REQUESTS,(ServerPlayer)c.player())){
                 PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,"Loading media",true,-2,false));return;
-            }var clip=group.controller().mediaForEditing();if(clip!=null)sendParts(p.pos,clip,part->PacketDistributor.sendToPlayer((ServerPlayer)c.player(),part));return;}
+            }var archive=group.controller().mediaArchive();
+                if(archive!=null){var transfer=new Transfer(p.pos,group.width(),group.height(),archive);TRANSFERS.put(c.player().getUUID(),transfer);pump(transfer,(ServerPlayer)c.player());}
+                return;}
             if(p.action.equals("clear")){group.controller().clearMedia();for(int r=0;r<group.height();r++)group.controller().setLine(group,r,"");}
             else group.controller().mediaControl(p.action);
             PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,
@@ -110,7 +138,7 @@ public final class MediaNetwork {
             try {
                 var clip=MediaClip.fromArchive(upload.data);
                 if(clip.columns()!=group.width()||clip.rows()!=group.height())throw new IllegalArgumentException("Board dimensions changed");
-                group.controller().installMedia(clip);
+                group.controller().installMedia(clip,upload.data);
                 boolean still=clip.count()==1;
                 player.displayClientMessage(still?Component.translatable("message.create_display_works.media_loaded_image")
                     :Component.translatable("message.create_display_works.media_loaded",clip.count()),true);
@@ -119,10 +147,16 @@ public final class MediaNetwork {
 
         }
     }
-    public static void upload(BlockPos pos,MediaClip clip) {sendParts(pos,clip,PacketDistributor::sendToServer);}
-    private static void sendParts(BlockPos pos,MediaClip clip,Consumer<Part> send) {
+    public static void upload(BlockPos pos,MediaClip clip) {
         byte[] bytes=clip.archive();
-        for(int offset=0;offset<bytes.length;offset+=16384)
-            send.accept(new Part(pos,clip.columns(),clip.rows(),bytes.length,offset,Arrays.copyOfRange(bytes,offset,Math.min(offset+16384,bytes.length))));
+        for(int offset=0;offset<bytes.length;offset+=PART_BYTES)
+            PacketDistributor.sendToServer(new Part(pos,clip.columns(),clip.rows(),bytes.length,offset,Arrays.copyOfRange(bytes,offset,Math.min(offset+PART_BYTES,bytes.length))));
+    }
+    private static void pump(Transfer transfer,ServerPlayer player) {
+        while(transfer.sent<transfer.data.length&&transfer.sent-transfer.acked<WINDOW_BYTES){
+            int end=Math.min(transfer.sent+PART_BYTES,transfer.data.length);
+            PacketDistributor.sendToPlayer(player,new Part(transfer.pos,transfer.w,transfer.h,transfer.data.length,transfer.sent,Arrays.copyOfRange(transfer.data,transfer.sent,end)));
+            transfer.sent=end;
+        }
     }
 }

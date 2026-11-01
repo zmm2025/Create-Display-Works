@@ -14,11 +14,14 @@ public final class EditableMedia {
         this.width=width;this.height=height;this.count=count;this.packed=packed;
     }
     public int width(){return width;} public int height(){return height;} public int count(){return count;}
-    public static EditableMedia fromRgba(int w,int h,byte[] rgba) {
+    public static EditableMedia fromRgba(int w,int h,byte[] rgba) {return fromPixels(w,h,luminance(rgba));}
+    /** Like {@link #fromRgba(int,int,byte[])}, already shrunk for that board. */
+    public static EditableMedia fromRgba(int w,int h,byte[] rgba,int columns,int rows) {return fromPixels(w,h,luminance(rgba),columns,rows);}
+    private static byte[] luminance(byte[] rgba) {
         if(rgba.length%4!=0)throw new IllegalArgumentException("Invalid RGBA pixels");
         byte[] pixels=new byte[rgba.length/2];
         for(int i=0,j=0;i<rgba.length;i+=4,j+=2){pixels[j]=(byte)Math.round(Monochrome.luminance(rgba[i]&255,rgba[i+1]&255,rgba[i+2]&255));pixels[j+1]=rgba[i+3];}
-        return fromPixels(w,h,pixels);
+        return pixels;
     }
     public static EditableMedia fromPixels(int w,int h,byte[] pixels) {
         if(w<1||h<1||w>MAX_EDGE||h>MAX_EDGE||w*h>MAX_PIXELS||pixels.length%(w*h*2)!=0)throw new IllegalArgumentException("Invalid source pixels");
@@ -26,6 +29,45 @@ public final class EditableMedia {
             try(var out=new DeflaterOutputStream(bytes)){out.write(pixels);}
             return new EditableMedia(w,h,pixels.length/(w*h*2),bytes.toByteArray());
         }catch(IOException e){throw new UncheckedIOException(e);}
+    }
+    /**
+     * The source size a board needs: twice its dots across and down, so every framing still samples at least two
+     * source pixels per dot. Larger sources only cost memory, since the board can't show the extra detail.
+     */
+    public static int[] compactSize(int width,int height,int columns,int rows) {
+        double scale=Math.max(2.0*columns*8/width,2.0*rows*8/height);
+        if(scale>=1)return new int[]{width,height};
+        return new int[]{Math.clamp((long)Math.ceil(width*scale-1e-6),1,width),Math.clamp((long)Math.ceil(height*scale-1e-6),1,height)};
+    }
+    /** This source shrunk to {@link #compactSize} for that board, or itself when it already fits. */
+    public EditableMedia compactFor(int columns,int rows) {
+        int[] size=compactSize(width,height,columns,rows);
+        if(size[0]==width&&size[1]==height)return this;
+        return fromPixels(size[0],size[1],resample(pixels(),width,height,count,size[0],size[1]));
+    }
+    /** Like {@link #fromPixels(int,int,byte[])}, already shrunk for that board. */
+    public static EditableMedia fromPixels(int w,int h,byte[] pixels,int columns,int rows) {
+        if(w<1||h<1||pixels.length%(w*h*2)!=0)throw new IllegalArgumentException("Invalid source pixels");
+        int[] size=compactSize(w,h,columns,rows);
+        return fromPixels(size[0],size[1],size[0]==w&&size[1]==h?pixels:resample(pixels,w,h,pixels.length/(w*h*2),size[0],size[1]));
+    }
+    /** Averages the area each new pixel covers, weighting luminance by alpha so transparent pixels add no halo. */
+    private static byte[] resample(byte[] pixels,int w,int h,int count,int nw,int nh) {
+        byte[] result=new byte[nw*nh*count*2];
+        double sx=(double)w/nw,sy=(double)h/nh;
+        for(int f=0;f<count;f++)for(int y=0;y<nh;y++)for(int x=0;x<nw;x++){
+            double top=y*sy,bottom=top+sy,left=x*sx,right=left+sx,alpha=0,light=0;
+            for(int v=(int)top;v<Math.min(h,Math.ceil(bottom));v++){
+                double coverY=Math.min(bottom,v+1)-Math.max(top,v);
+                for(int u=(int)left;u<Math.min(w,Math.ceil(right));u++){
+                    int i=((f*h+v)*w+u)*2;double a=(pixels[i+1]&255)*coverY*(Math.min(right,u+1)-Math.max(left,u));
+                    alpha+=a;light+=(pixels[i]&255)*a;
+                }
+            }
+            int o=((f*nh+y)*nw+x)*2;
+            result[o]=(byte)Math.round(alpha==0?0:light/alpha);result[o+1]=(byte)Math.round(Math.min(255,alpha/(sx*sy)));
+        }
+        return result;
     }
     /** Validate untrusted archives without retaining a second uncompressed source. */
     public void validate() {

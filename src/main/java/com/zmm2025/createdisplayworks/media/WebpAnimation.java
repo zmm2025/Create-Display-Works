@@ -57,6 +57,6 @@ final class WebpAnimation {
                 time+=frame.duration;
             }
         }finally{reader.dispose();graphics.dispose();}
-        return EditableMedia.fromPixels(w,h,pixels.toByteArray()).render(columns,rows,name,new MediaSettings(threshold,invert,dither,scale,seconds));
+        return EditableMedia.fromPixels(w,h,pixels.toByteArray(),columns,rows).render(columns,rows,name,new MediaSettings(threshold,invert,dither,scale,seconds));
     }
 }

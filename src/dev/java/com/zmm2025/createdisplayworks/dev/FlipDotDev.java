@@ -22,6 +22,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.GameType;
@@ -50,8 +51,10 @@ public final class FlipDotDev {
             .executes(c->{build(c.getSource().getPlayerOrException());return 1;})
             .then(Commands.literal("speed").then(Commands.argument("rpm",IntegerArgumentType.integer(-256,256)).executes(c->{speed(IntegerArgumentType.getInteger(c,"rpm"));return 1;})))
             .then(Commands.literal("text").then(Commands.argument("text",StringArgumentType.greedyString()).executes(c->{text(StringArgumentType.getString(c,"text"));return 1;})))
-            .then(Commands.literal("test").executes(c->{started=world.getGameTime();stage=0;failures.clear();speed(32);text("32");return 1;})));
+            .then(Commands.literal("test").executes(c->{if(world==null)build(c.getSource().getPlayerOrException());started=world.getGameTime();stage=0;failures.clear();speed(32);text("32");return 1;})));
     }
+    // The fixture outlives its world otherwise, which keeps the closed level and player in memory.
+    @SubscribeEvent public static void stopped(ServerStoppedEvent event) { world=null;viewer=null;origin=null;started=-1; }
     private static FlipDotBlockEntity tile(int x,int y) { return (FlipDotBlockEntity)world.getBlockEntity(origin.offset(x,y,0)); }
     private static void build(ServerPlayer player) {
         viewer=player;world=player.serverLevel();origin=new BlockPos(0,100,0);
