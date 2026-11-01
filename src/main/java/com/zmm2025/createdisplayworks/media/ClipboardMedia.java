@@ -66,11 +66,13 @@ public final class ClipboardMedia {
             return last.isEmpty()||last.startsWith(".")||last.matches("(?i)(con|prn|aux|nul|com\\d|lpt\\d)")?null:last;
         }catch(IllegalArgumentException e){return null;}
     }
-    private static String text(byte[] data){
+    static String text(byte[] data){
         if(data==null)return null;
-        // Firefox on Linux offers its clipboard text as UTF-16.
-        for(byte b:data)if(b==0)return new String(data,java.nio.charset.StandardCharsets.UTF_16LE).replace("\uFEFF","");
-        return new String(data,java.nio.charset.StandardCharsets.UTF_8);
+        // Windows clipboard memory ends in a NUL terminator and sometimes padding, so trim those first.
+        int end=data.length;while(end>0&&data[end-1]==0)end--;
+        // Firefox on Linux offers its clipboard text as UTF-16, the only case with zero bytes inside the text.
+        for(int i=0;i<end;i++)if(data[i]==0)return new String(data,0,Math.min(data.length,end+end%2),java.nio.charset.StandardCharsets.UTF_16LE).replace("\uFEFF","");
+        return new String(data,0,end,java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static final class Mac {
