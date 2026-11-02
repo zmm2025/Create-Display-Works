@@ -10,6 +10,7 @@ import net.minecraft.nbt.*;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.state.BlockState;
 import com.zmm2025.createdisplayworks.media.MediaClip;
+import com.zmm2025.createdisplayworks.media.MediaStore;
 
 public class FlipDotBlockEntity extends KineticBlockEntity {
     public static java.util.function.Consumer<FlipDotBlockEntity> clientTick=be->{};
@@ -33,7 +34,16 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     private boolean hasText, bitmapMode;
     private FlipDotAssembly assembly;
     private long lastAssemblyScan = Long.MIN_VALUE / 2;
+    // Playback frames only. The editable source lives in the saved archive, which is built once and reused for every
+    // save and editor request instead of being rebuilt each time.
     private MediaClip media;
+    /**
+     * Saved inline only when the store couldn't write {@link #mediaId}'s file. Otherwise the archive, with the editable
+     * source, is read from the store when the media screen asks for it.
+     */
+    private byte[] mediaArchive;
+    /** The {@link MediaStore} id of {@link #media}, or null if it couldn't be stored and has to be saved inline. */
+    private String mediaId;
     private int mediaFrame;
     private boolean mediaPlaying, mediaLoop=true;
 
@@ -131,21 +141,36 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         return true;
     }
-    public void installMedia(MediaClip clip) {
+    public void installMedia(MediaClip clip) {installMedia(clip,null);}
+    /** {@code archive}, when given, must be {@code clip}'s archive; it's reused if the source needs no shrinking. */
+    public void installMedia(MediaClip clip,byte[] archive) {
         var group=assembly();if(group==null||group.width()!=clip.columns()||group.height()!=clip.rows())return;
         for(var tile:group.tiles()){tile.clearMedia();tile.assembly=group;}
-        media=clip;mediaFrame=0;mediaPlaying=clip.count()>1;mediaLoop=true;playbackDelay=0;
+        storeMedia(clip,archive);claimMedia();mediaFrame=0;mediaPlaying=clip.count()>1;mediaLoop=true;playbackDelay=0;
         // A still image is an ordinary latest target, including while unpowered.
-        queueMediaFrame(group,clip.frame(0));
+        queueMediaFrame(group,media.frame(0));
         setChanged();
     }
+    private void claimMedia(){if(mediaId!=null && level instanceof net.minecraft.server.level.ServerLevel server)MediaStore.claim(server,worldPosition,mediaId);}
+    private void releaseMedia(){if(mediaId!=null && level instanceof net.minecraft.server.level.ServerLevel server)MediaStore.release(server,worldPosition,mediaId);}
+    // Boards loaded from disk get their level after reading their data, and copies made with /clone read it afterwards.
+    @Override public void setLevel(net.minecraft.world.level.Level level){super.setLevel(level);claimMedia();}
+    @Override public void destroy(){super.destroy();releaseMedia();}
     public boolean isMediaPlaying(){return media!=null && mediaPlaying && wasPowered;}
-    public void clearMedia(){com.zmm2025.createdisplayworks.media.MediaLimits.release(this);media=null;mediaFrame=0;mediaPlaying=false;setChanged();}
+    public void clearMedia(){com.zmm2025.createdisplayworks.media.MediaLimits.release(this);releaseMedia();media=null;mediaId=null;mediaArchive=null;mediaFrame=0;mediaPlaying=false;setChanged();}
+    /** Stores the clip with its editable source shrunk to what this board can show, and keeps only playback in memory. */
+    private void storeMedia(MediaClip clip,byte[] archive) {
+        var compact=clip.withCompactSource();
+        byte[] bytes=compact==clip&&archive!=null?archive:compact.archive();
+        media=compact.withoutSource();mediaId=MediaStore.save(level.getServer(),bytes);mediaArchive=mediaId==null?bytes:null;
+    }
     public void mediaControl(String action) {
         switch(action){case "play" -> mediaPlaying=true;case "pause" -> mediaPlaying=false;case "restart" -> {mediaFrame=0;playbackDelay=0;mediaPlaying=true;}case "loop" -> mediaLoop=!mediaLoop;default -> {return;}}
         setChanged();sendData();
     }
-    public MediaClip mediaForEditing(){return media;}
+    /** The saved archive, with the editable source, for the media screen. */
+    public byte[] mediaArchive(){return mediaId!=null?MediaStore.read(mediaId):mediaArchive;}
+    public String mediaId(){return mediaId;}
     public String mediaFilename(){return media==null?"":media.filename();}
     public long[] mediaThumbnail(){return media==null?new long[0]:media.frame(0);}
     public int mediaFrameCount(){return media==null?0:media.count();}
@@ -219,6 +244,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public int movingDiscs(float partial) { return motion.moving(level.getGameTime()+partial); }
     public float discSpeed() { return motion.speed(); }
     public float angle(int index,float partial) { return motion.angle(index,level.getGameTime()+partial); }
+    public boolean discsSettled(float partial) { return motion.settled(level.getGameTime()+partial); }
+    public int motionVersion() { return motion.version(); }
     /**
      * Update packets are built in the server tick after a flip starts, and they reach the client later still. A 256 RPM
      * flip lasts one tick, so replaying it on the server's clock would show it already finished. Up to
@@ -257,7 +284,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         if(knownController!=null)tag.putLong("KnownController",knownController.asLong());
         tag.putLongArray("KnownMembers",knownMembers);
         tag.putString("RowText", rowText); tag.putBoolean("HasText", hasText); tag.putBoolean("BitmapMode", bitmapMode);
-        if(!clientPacket && media!=null){tag.putByteArray("MediaArchive",media.archive());tag.putInt("MediaFrame",mediaFrame);tag.putBoolean("MediaPlaying",mediaPlaying);tag.putBoolean("MediaLoop",mediaLoop);}
+        if(!clientPacket && media!=null){if(mediaId!=null)tag.putString("MediaId",mediaId);else tag.putByteArray("MediaArchive",mediaArchive);tag.putInt("MediaFrame",mediaFrame);tag.putBoolean("MediaPlaying",mediaPlaying);tag.putBoolean("MediaLoop",mediaLoop);}
     }
     @Override protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
@@ -275,6 +302,15 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         if(knownMembers.length>256)knownMembers=new long[0];
         restoreClock=!clientPacket;wasPowered=tag.getBoolean("WasPowered");playbackDelay=Math.clamp(tag.getInt("PlaybackDelay"),0,20/MediaClip.FPS);
         String text = tag.getString("RowText"); rowText = text.substring(0, Math.min(512, text.length())); hasText = tag.getBoolean("HasText"); bitmapMode = tag.getBoolean("BitmapMode");
-        if(!clientPacket){media=null;if(tag.contains("MediaArchive"))try{media=MediaClip.fromArchive(tag.getByteArray("MediaArchive"));mediaFrame=Math.floorMod(tag.getInt("MediaFrame"),media.count());mediaPlaying=tag.getBoolean("MediaPlaying");mediaLoop=tag.getBoolean("MediaLoop");}catch(IllegalArgumentException ignored){mediaPlaying=false;}}
+        if(!clientPacket){media=null;mediaId=null;mediaArchive=null;
+            // Older saves, and boards whose clip couldn't be stored, keep the clip inline. It moves to the store on load.
+            if(tag.contains("MediaId")){mediaId=tag.getString("MediaId");var clip=MediaStore.load(mediaId);if(clip==null)mediaId=null;else media=clip.withoutSource();}
+            else if(tag.contains("MediaArchive"))try{
+                byte[] archive=tag.getByteArray("MediaArchive");media=MediaClip.fromArchive(archive).withoutSource();
+                var server=net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();if(server!=null)mediaId=MediaStore.save(server,archive);
+                if(mediaId==null)mediaArchive=archive;
+            }catch(IllegalArgumentException ignored){}
+            claimMedia();
+            if(media!=null){mediaFrame=Math.floorMod(tag.getInt("MediaFrame"),media.count());mediaPlaying=tag.getBoolean("MediaPlaying");mediaLoop=tag.getBoolean("MediaLoop");}else mediaPlaying=false;}
     }
 }

@@ -4,6 +4,8 @@
 //                            shows it and follows its log if it's already running
 //   ./gradlew devReload      compiles, then pushes code, assets and data into the running client
 //   ./gradlew devStart       for agents: starts this checkout's Minecraft hidden, in a T3 Code terminal when possible
+//   ./gradlew devStop        closes this checkout's Minecraft the way its close button does; T3 Code runs it when a
+//                            thread settles
 //
 // The in-game side lives in src/dev/java/.../dev/tools; the class-redefinition agent lives in src/devAgent.
 
@@ -340,6 +342,17 @@ class DevClientLauncher {
 
 /** Opens a terminal in a T3 Code thread and runs a command in it, so the user can watch and stop what an agent started. */
 class DevT3Terminal {
+    /**
+     * Makes the terminal's shell exit once the command succeeds, for example when the game is closed normally. T3 Code
+     * then closes the terminal; an idle one would still keep T3 from cleaning up the worktree. A failed build or a
+     * crash leaves it open to read. T3 Code's terminals run PowerShell on Windows.
+     */
+    static String closingOnSuccess(String command) {
+        return System.getProperty('os.name').toLowerCase().contains('windows')
+                ? command + '; if ($LASTEXITCODE -eq 0) { exit }'
+                : command + ' && exit'
+    }
+
     static boolean run(String cli, File t3Home, String threadId, String terminalId, File cwd, String command, Logger logger) {
         Map session = null
         try {
@@ -421,7 +434,7 @@ abstract class DevStartTask extends DefaultTask {
         if (!DevInstances.running(gameDir)) {
             new File(gameDir, 'dev-instance.json').delete()
             boolean inTerminal = threadId.present && t3Cli.present && DevT3Terminal.run(t3Cli.get(), new File(t3Home.get()), threadId.get(),
-                    'minecraft', checkoutDir, './gradlew runDevClient -PdevHidden', logger)
+                    'minecraft', checkoutDir, DevT3Terminal.closingOnSuccess('./gradlew runDevClient -PdevHidden'), logger)
             if (inTerminal) {
                 logger.lifecycle("Starting Minecraft hidden in this thread's 'minecraft' terminal in T3 Code.")
             } else {
@@ -456,6 +469,56 @@ abstract class DevStartTask extends DefaultTask {
     }
 }
 
+abstract class DevStopTask extends DefaultTask {
+    @Input abstract Property<String> getGameDirectory()
+    /** The main checkout's fixed port, for a game that didn't record its port; empty in a worktree. */
+    @Input abstract Property<String> getDefaultPort()
+
+    DevStopTask() {
+        outputs.upToDateWhen { false }
+    }
+
+    @TaskAction
+    void stop() {
+        File gameDir = new File(gameDirectory.get())
+        if (!DevInstances.running(gameDir)) {
+            logger.lifecycle('DEV STOP: NOT RUNNING - no dev client is running for this checkout.')
+            return
+        }
+        Map info = DevInstances.info(gameDir)
+        def port = info?.port ?: defaultPort.get() ?: null
+        boolean asked = false
+        try {
+            // A game started before /quit existed answers 404.
+            asked = (new JsonSlurper().parseText(DevInstances.post(port, '/quit', '')) as Map).ok == true
+            if (!asked) logger.lifecycle("Minecraft can't be asked to close; it's running older dev tools.")
+        } catch (Exception e) {
+            logger.lifecycle("Couldn't ask Minecraft to close (${e.message}).")
+        }
+        // Saving the world can take a while.
+        if (asked && waitForExit(gameDir, 2)) {
+            logger.lifecycle('DEV STOP: STOPPED - Minecraft saved and closed.')
+            return
+        }
+        if (asked) logger.lifecycle("Minecraft didn't close within 2 minutes.")
+        ProcessHandle game = info?.pid ? ProcessHandle.of(info.pid as long).orElse(null) : null
+        if (game == null) throw new GradleException("DEV STOP: FAILED - Minecraft didn't close, and its process isn't known.")
+        logger.lifecycle("Ending Minecraft's process ${info.pid} without saving.")
+        game.destroyForcibly()
+        if (!waitForExit(gameDir, 1)) throw new GradleException("DEV STOP: FAILED - Minecraft's process ${info.pid} is still running.")
+        logger.lifecycle('DEV STOP: KILLED - Minecraft was ended without saving. Its terminal stays open, showing the failed run.')
+    }
+
+    private static boolean waitForExit(File gameDir, long minutes) {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(minutes)
+        while (DevInstances.running(gameDir)) {
+            if (System.nanoTime() > deadline) return false
+            Thread.sleep(250)
+        }
+        return true
+    }
+}
+
 abstract class DevReloadTask extends DefaultTask {
     @Input abstract Property<String> getGameDirectory()
     @Input abstract Property<String> getRunDirectory()
@@ -487,14 +550,28 @@ abstract class DevReloadTask extends DefaultTask {
             response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
                     .send(request, HttpResponse.BodyHandlers.ofString())
         } catch (ConnectException ignored) {
-            logger.lifecycle('DEV RELOAD: NO SESSION - Launch Minecraft to try these changes.')
+            logger.lifecycle('DEV RELOAD: NO SESSION - no dev client is running for this checkout.')
             return
         }
         Map result = new JsonSlurper().parseText(response.body()) as Map
         (result.details as List)?.each { logger.lifecycle("  ${it}") }
-        String line = "DEV RELOAD: ${result.status.toString().toUpperCase().replace('-', ' ')} - ${result.message}"
+        String line = "DEV RELOAD: ${result.status.toString().toUpperCase().replace('-', ' ')} - ${result.message} ${windowState(port)}"
         if (result.status in ['reloaded', 'no-changes']) logger.lifecycle(line)
         else throw new GradleException(line)
+    }
+
+    /**
+     * Whether someone can see the game. A hidden one was started by an agent with devStart, or minimized, so the user
+     * isn't looking at it, and agents word their closing line differently (see AGENTS.md).
+     */
+    private static String windowState(Object port) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status")).timeout(Duration.ofSeconds(5)).build()
+            Map status = new JsonSlurper().parseText(HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()).body()) as Map
+            return status.hidden ? '[window hidden: the user is not looking at this game]' : '[window shown]'
+        } catch (Exception ignored) {
+            return '[window state unknown]'
+        }
     }
 }
 
@@ -519,4 +596,11 @@ tasks.register('devStart', DevStartTask) {
     threadId = providers.gradleProperty('threadId')
     t3Cli = providers.environmentVariable('T3CODE_CLI_PATH')
     t3Home = providers.environmentVariable('T3CODE_HOME').orElse(new File(System.getProperty('user.home'), '.t3').absolutePath)
+}
+
+tasks.register('devStop', DevStopTask) {
+    group = 'dev'
+    description = "Closes this checkout's dev client the way its close button does, saving the world. T3 Code runs it when a thread settles."
+    gameDirectory = devInstanceDir.absolutePath
+    defaultPort = devIsWorktree ? '' : devControlPort
 }

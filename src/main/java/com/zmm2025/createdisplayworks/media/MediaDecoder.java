@@ -8,7 +8,6 @@ import java.security.*;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.zip.ZipInputStream;
 
@@ -17,7 +16,9 @@ public final class MediaDecoder {
     private static final String FORMATS="png_pipe,jpeg_pipe,gif,mov,matroska,webm,webp_pipe,bmp_pipe,image2,image2pipe,apng,ico,webp";
     private static final String VERSION="8.0.1-1.5.13";
     private static final long MAX_BYTES=100L*1024*1024;
-    private static final java.util.concurrent.ScheduledExecutorService TIMEOUTS=Executors.newSingleThreadScheduledExecutor(r->{var t=new Thread(r,"media-download-timeout");t.setDaemon(true);return t;});
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor TIMEOUTS=new java.util.concurrent.ScheduledThreadPoolExecutor(1,r->{var t=new Thread(r,"media-download-timeout");t.setDaemon(true);return t;});
+    // Cancelled timeouts would otherwise hold their download stream for the full 90 seconds.
+    static{TIMEOUTS.setRemoveOnCancelPolicy(true);}
     private static final Map<String,String> HASHES=Map.of(
         "windows-x86_64","cb570de36a555156e22cac3ddb21be9051e6b3df05142a29445773ea0e7fedb9",
         "linux-x86_64","01da6cce8fb8686abd4a0be940edafcc199255cc97b37b28c49d4f696c1d9ef3",
@@ -43,7 +44,8 @@ public final class MediaDecoder {
                 if(response.statusCode()!=200)throw new IOException("Download returned HTTP "+response.statusCode());
                 byte[] buffer=new byte[16384];long total=0;long deadline=System.nanoTime()+Duration.ofSeconds(90).toNanos();
                 for(int n;(n=input.read(buffer))!=-1;) {
-                    if((total+=n)>MAX_BYTES || System.nanoTime()>deadline)throw new IOException("Media exceeds 100 MB or the download time limit.");
+                    if((total+=n)>MAX_BYTES)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"Media exceeds 100 MB.");
+                    if(System.nanoTime()>deadline)throw new MediaImportException(MediaImportException.Reason.TIMED_OUT,"Media exceeds the download time limit.");
                     if(Thread.currentThread().isInterrupted())throw new InterruptedIOException();
                     output.write(buffer,0,n);
                 }
@@ -75,7 +77,7 @@ public final class MediaDecoder {
             if(!os.contains("win") && !exe.toFile().setExecutable(true))throw new IOException("Cannot make the decoder executable.");
             Files.writeString(root.resolve("verified"),hash);
             return exe;
-        }finally{Files.deleteIfExists(archive);}
+        }finally{deleteTree(archive);}
     }
     public static MediaClip decode(String source,int columns,int rows,int seconds,int threshold,boolean invert,Path cache,Consumer<String> status) throws Exception {
         return decode(source,columns,rows,seconds,threshold,invert,Scale.STRETCH,false,cache,status);
@@ -85,14 +87,19 @@ public final class MediaDecoder {
         cache=cache.toAbsolutePath().normalize();
         if(columns<1||rows<1||columns>32||rows>32||columns*rows>MediaClip.MAX_TILES)throw new IllegalArgumentException("Media canvases support at most 256 blocks.");
         if(seconds<1 || seconds>60 || threshold<0 || threshold>255)throw new IllegalArgumentException("Invalid import settings");
-        Files.createDirectories(cache);Path temp=Files.createTempDirectory(cache,"import-");
+        Files.createDirectories(cache);sweep(cache);Path temp=Files.createTempDirectory(cache,"import-");
         Process process=null;
         try {
             Path input=temp.resolve("input"),raw=temp.resolve("frames.raw"),errors=temp.resolve("decode.txt");
             status.accept("Loading media...");
             if(YouTubeImport.matches(source)) YouTubeImport.download(source,seconds,cache,temp,input,decoder(cache,status),status);
             else if(source.startsWith("https://") || source.startsWith("http://"))download(URI.create(source),input);
-            else {Path file=Path.of(source);if(!Files.isRegularFile(file)||Files.size(file)>MAX_BYTES)throw new IOException("Choose a media file smaller than 100 MB.");Files.copy(file,input);}
+            else {
+                Path file=Path.of(source);
+                if(!Files.isRegularFile(file))throw new MediaImportException(MediaImportException.Reason.NOT_FOUND,"No media file exists at "+file);
+                if(Files.size(file)>MAX_BYTES)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"Choose a media file smaller than 100 MB.");
+                Files.copy(file,input);
+            }
             Path executable=decoder(cache,status);status.accept("Converting to "+columns*8+" x "+rows*8+" dots...");
             int w=columns*8,h=rows*8;
             byte[] header;try(var in=Files.newInputStream(input)){header=in.readNBytes(65536);}
@@ -127,12 +134,35 @@ public final class MediaDecoder {
                 throw new IOException("Cannot decode this media. Check the file format and try a direct media link or a public YouTube video.");
             }
             long size=Files.size(raw);if(size>(long)w*h*4*MediaClip.MAX_FRAMES || size%(w*h*4)!=0)throw new IOException("Decoded media exceeds the frame limit.");
-            byte[] pixels=Files.readAllBytes(raw);var original=EditableMedia.fromRgba(w,h,pixels);
+            byte[] pixels=Files.readAllBytes(raw);var original=EditableMedia.fromRgba(w,h,pixels,columns,rows);
             status.accept("Ready: "+original.count()+" frames");
             return original.render(columns,rows,filename(source),new MediaSettings(threshold,invert,dither,scale,seconds));
         }finally {
-            if(process!=null && process.isAlive())process.destroyForcibly().waitFor();
-            try(var files=Files.list(temp)){for(Path file:files.toList())Files.deleteIfExists(file);}Files.deleteIfExists(temp);
+            if(process!=null && process.isAlive()){
+                process.destroyForcibly();
+                // A cancelled import is interrupted, and waiting must not skip the cleanup below.
+                try{process.waitFor(5,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}
+            }
+            deleteTree(temp);
         }
+    }
+    private static final java.util.concurrent.atomic.AtomicBoolean SWEPT=new java.util.concurrent.atomic.AtomicBoolean();
+    /** Once per session, removes scratch folders and decoder downloads that a crash or a locked file left behind. */
+    private static void sweep(Path cache) {
+        if(SWEPT.getAndSet(true))return;
+        long cutoff=System.currentTimeMillis()-TimeUnit.HOURS.toMillis(1);
+        try(var entries=Files.list(cache)){
+            for(Path entry:entries.toList()){
+                String name=entry.getFileName().toString();
+                if(!(name.startsWith("import-")&&Files.isDirectory(entry))&&!(name.startsWith("decoder-")&&name.endsWith(".jar")))continue;
+                try{if(Files.getLastModifiedTime(entry).toMillis()<cutoff)deleteTree(entry);}catch(IOException ignored){}
+            }
+        }catch(IOException ignored){}
+    }
+    /** Deletes what it can, innermost first, and never throws, so cleanup can't replace an import's real result. */
+    static void deleteTree(Path root) {
+        try(var paths=Files.walk(root)){
+            for(Path path:paths.sorted(Comparator.reverseOrder()).toList())try{Files.deleteIfExists(path);}catch(IOException ignored){}
+        }catch(IOException|UncheckedIOException ignored){}
     }
 }

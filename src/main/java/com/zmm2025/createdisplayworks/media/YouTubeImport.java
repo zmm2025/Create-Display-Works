@@ -32,7 +32,7 @@ final class YouTubeImport {
             } else Files.copy(archive,exe,StandardCopyOption.REPLACE_EXISTING);
             if(!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")&&!exe.toFile().setExecutable(true))throw new IOException("Cannot run YouTube helper.");
             Files.writeString(root.resolve("verified"),actual);return exe;
-        }finally{Files.deleteIfExists(archive);}
+        }finally{MediaDecoder.deleteTree(archive);}
     }
     private static void run(List<String> command,Path temp,Path output,Path ffmpeg) throws Exception {
         Path errors=temp.resolve("youtube-errors.txt");
@@ -43,9 +43,9 @@ final class YouTubeImport {
         try {
             while(!process.waitFor(200,TimeUnit.MILLISECONDS)) {
                 if(Thread.currentThread().isInterrupted())throw new InterruptedException();
-                if(System.nanoTime()>deadline)throw new IOException("YouTube import timed out. Try a direct media file.");
+                if(System.nanoTime()>deadline)throw new MediaImportException(MediaImportException.Reason.TIMED_OUT,"YouTube import timed out. Try a direct media file.");
                 long size=0;try(var files=Files.list(temp)){for(Path file:files.toList())if(Files.isRegularFile(file))size+=Files.size(file);}
-                if(size>LIMIT)throw new IOException("YouTube import exceeds 100 MB.");
+                if(size>LIMIT)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"YouTube import exceeds 100 MB.");
             }
             if(process.exitValue()!=0)throw new IOException("YouTube could not provide this video. It may require sign-in, be restricted, or be unavailable. Try a direct media file.");
         }finally{process.descendants().forEach(ProcessHandle::destroyForcibly);if(process.isAlive())process.destroyForcibly().waitFor();}

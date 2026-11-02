@@ -5,29 +5,34 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
+import java.lang.ref.WeakReference;
 import java.util.*;
 
 /** One attenuated loop per board; the sole sample is modulated by physical disc motion. */
 public final class DiscRattle extends AbstractTickableSoundInstance {
+    // The sound only weakly holds its board, so entries the sound engine dropped don't keep old levels alive.
     private static final Map<FlipDotBlockEntity,DiscRattle> SOUNDS=new WeakHashMap<>();
     private static final int SILENT_TICKS=4;
-    private final FlipDotBlockEntity board;
+    private final WeakReference<FlipDotBlockEntity> board;
     private int silent;
     private DiscRattle(FlipDotBlockEntity board) {
         super(ModContent.RATTLE.get(),SoundSource.BLOCKS,RandomSource.create());
-        this.board=board;looping=true;delay=0;volume=0;
+        this.board=new WeakReference<>(board);looping=true;delay=0;volume=0;
         x=board.getBlockPos().getX()+.5;y=board.getBlockPos().getY()+.5;z=board.getBlockPos().getZ()+.5;
     }
     public static void update(FlipDotBlockEntity board) {
         var sound=SOUNDS.get(board);
-        if(sound!=null&&!sound.isStopped())return;
+        var sounds=Minecraft.getInstance().getSoundManager();
+        // Level changes, resource reloads and muting drop sounds without stopping them, so ask the engine.
+        if(sound!=null&&!sound.isStopped()&&sounds.isActive(sound))return;
         sound=new DiscRattle(board);sound.silent=SILENT_TICKS;sound.tick();
         if(sound.isStopped())return;
-        SOUNDS.put(board,sound);Minecraft.getInstance().getSoundManager().play(sound);
+        SOUNDS.put(board,sound);sounds.play(sound);
     }
     @Override public boolean canStartSilent(){return true;}
     @Override public void tick() {
-        if(board.isRemoved()||board.getLevel()!=Minecraft.getInstance().level){stop();SOUNDS.remove(board);return;}
+        var board=this.board.get();
+        if(board==null||board.isRemoved()||board.getLevel()!=Minecraft.getInstance().level){stop();if(board!=null)SOUNDS.remove(board);return;}
         var group=board.assembly();
         if(group==null||group.controller()!=board){stop();SOUNDS.remove(board);return;}
         int moving=0;float speed=0;

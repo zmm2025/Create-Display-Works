@@ -73,7 +73,7 @@ public final class DevTools {
     private static final String WORKTREE = System.getProperty("createdisplayworks.dev.worktree", "");
     /** Created as soon as the mod's event subscribers load, so the baseline matches the classes the game loaded. */
     private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("createdisplayworks.dev.classRoots"), paths("createdisplayworks.dev.resourceRoots")) : null;
-    private static final String RELOADED = "Your Minecraft client has been reloaded.";
+    private static final String RELOADED = "Reloaded the changes.";
     private static volatile PendingScreenshot screenshot;
     /** Encodes and saves screenshot frames off the render thread, so a sequence doesn't stall the frames it captures. */
     private static final ExecutorService SCREENSHOT_WRITERS = Executors.newFixedThreadPool(Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 6), task -> {
@@ -220,7 +220,7 @@ public final class DevTools {
             message = "Restart Minecraft to try these changes.";
         } else if(result.changes().isEmpty() && !full) {
             status = "no-changes";
-            message = "No reload or restart needed.";
+            message = "The game already runs this code.";
         } else {
             status = "reloaded";
             message = RELOADED;
@@ -505,14 +505,27 @@ public final class DevTools {
     }
 
     /** Presses a key (GLFW name such as {@code escape}, {@code e}, {@code enter}) in the open screen, or as a game keybind. */
-    static JsonObject key(String name) throws Exception {
+    /** {@code mods} lists held modifiers, such as {@code shortcut} (Cmd on macOS, Ctrl elsewhere), {@code shift}, {@code alt}. */
+    static JsonObject key(String name, String mods) throws Exception {
         InputConstants.Key key = InputConstants.getKey("key.keyboard." + name.toLowerCase(Locale.ROOT));
         if(key == InputConstants.UNKNOWN) return failure("Unknown key " + name + "; use GLFW names like escape, enter, e, left.shift, f3.");
+        int modifiers = 0;
+        for(String mod : mods == null || mods.isBlank() ? new String[0] : mods.toLowerCase(Locale.ROOT).split(",")) {
+            switch(mod.strip()) {
+                case "shortcut" -> modifiers |= Minecraft.ON_OSX ? org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER : org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+                case "ctrl", "control" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+                case "super", "cmd" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER;
+                case "shift" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT;
+                case "alt" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_ALT;
+                default -> { return failure("Unknown modifier " + mod + "; use shortcut, ctrl, super, shift or alt."); }
+            }
+        }
+        int held = modifiers;
         return onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
             if(minecraft.screen != null) {
-                minecraft.screen.keyPressed(key.getValue(), 0, 0);
-                if(minecraft.screen != null) minecraft.screen.keyReleased(key.getValue(), 0, 0);
+                minecraft.screen.keyPressed(key.getValue(), 0, held);
+                if(minecraft.screen != null) minecraft.screen.keyReleased(key.getValue(), 0, held);
             } else KeyMapping.click(key);
             return ok();
         });

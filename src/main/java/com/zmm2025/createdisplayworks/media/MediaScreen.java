@@ -11,6 +11,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -136,7 +137,7 @@ public final class MediaScreen extends AbstractSimiScreen {
             var filters=stack.mallocPointer(extensions.length);for(String extension:extensions)filters.put(stack.UTF8(extension));filters.flip();
             String chosen=org.lwjgl.util.tinyfd.TinyFileDialogs.tinyfd_openFileDialog(text("file_dialog.title").getString(),"",filters,text("file_dialog.filter").getString(),false);
             if(chosen!=null){setSource(chosen);importPreview();}
-        }catch(Exception e){showError("Unable to open the file chooser");syncControls();}
+        }catch(Exception e){showError(e);syncControls();}
     }
     private void control(String action){PacketDistributor.sendToServer(new MediaNetwork.Control(pos,action));}
     public void importPreview(){
@@ -148,13 +149,14 @@ public final class MediaScreen extends AbstractSimiScreen {
                 var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"),s->{});
                 byte[] pixels=clip.editable()==null?null:clip.editable().pixels();
                 minecraft.execute(()->{if(minecraft.screen!=this)return;preview=clip;original=clip.editable();originalPixels=pixels;fresh=true;dirty=false;busy=false;playing=true;previewTicks=0;status=text("status.ready");init();setFocused(null);syncControls();});
-            }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception.getMessage());syncControls();});}
+            }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception);syncControls();});}
         });
     }
-    private void showError(String detail){
-        String message=detail==null?"":detail.toLowerCase(Locale.ROOT);
+    private void showError(Exception error){
+        String message=error.getMessage()==null?"":error.getMessage().toLowerCase(Locale.ROOT);
+        var reason=error instanceof MediaImportException known?known.reason():null;
         status=text("status.load_failed");
-        errorDetail=text(message.contains("100 mb")?"error.too_large":message.contains("timed out")||message.contains("time limit")?"error.timed_out":message.contains("youtube")?"error.youtube":"error.unreadable");
+        errorDetail=text(reason==MediaImportException.Reason.NOT_FOUND?"error.not_found":reason==MediaImportException.Reason.TOO_LARGE?"error.too_large":reason==MediaImportException.Reason.TIMED_OUT?"error.timed_out":message.contains("youtube")?"error.youtube":"error.unreadable");
     }
     public void applyPreview(){
         if(busy||saving||!confirm.active)return;
@@ -164,7 +166,7 @@ public final class MediaScreen extends AbstractSimiScreen {
         job=WORKER.submit(()->{
             try{var rendered=sourceMedia==null?current:sourceMedia.render(columns,rows,current.filename(),selected);
                 minecraft.execute(()->{if(minecraft.screen==this)MediaNetwork.upload(pos,rendered);});
-            }catch(Exception e){minecraft.execute(()->{saving=false;showError(e.getMessage());syncControls();});}
+            }catch(Exception e){minecraft.execute(()->{saving=false;showError(e);syncControls();});}
         });
     }
     public void updateStatus(MediaNetwork.Status update){
@@ -180,7 +182,7 @@ public final class MediaScreen extends AbstractSimiScreen {
         if(!part.pos().equals(pos)||fresh||busy||part.columns()!=columns||part.rows()!=rows||part.total()<1||part.total()>EditableMedia.MAX_BYTES||part.offset()<0||part.offset()>part.total()-part.data().length)return;
         if(part.offset()==0){incoming=new byte[part.total()];received=0;}
         if(incoming==null||incoming.length!=part.total()||received!=part.offset())return;
-        System.arraycopy(part.data(),0,incoming,received,part.data().length);received+=part.data().length;
+        System.arraycopy(part.data(),0,incoming,received,part.data().length);received+=part.data().length;PacketDistributor.sendToServer(new MediaNetwork.Ack(pos,received));
         if(received==incoming.length){
             byte[] archive=incoming;incoming=null;busy=true;status=text("status.loading");syncControls();
             job=WORKER.submit(()->{
@@ -190,7 +192,7 @@ public final class MediaScreen extends AbstractSimiScreen {
                         cutoff=settings.threshold();invert=settings.invert();dither=settings.dither();scale=settings.scale();seconds=settings.seconds();
                         busy=false;dirty=false;status=text(original==null?"status.reimport":"status.on_display");init();syncControls();
                     });
-                }catch(Exception e){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(e.getMessage());syncControls();});}
+                }catch(Exception e){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(e);syncControls();});}
             });
         }
     }
@@ -200,7 +202,34 @@ public final class MediaScreen extends AbstractSimiScreen {
     public boolean previewReady(){return fresh&&preview!=null&&!busy&&!dirty;}
     public String importStatus(){return status.getString();}
     @Override public void onFilesDrop(List<java.nio.file.Path> paths){if(!paths.isEmpty()&&!busy&&!saving){setSource(paths.getFirst().toString());importPreview();}}
-    @Override public boolean keyPressed(int key,int scan,int modifiers){if((key==257||key==335)&&source.isFocused()){importPreview();return true;}return super.keyPressed(key,scan,modifiers);}
+    @Override public boolean keyPressed(int key,int scan,int modifiers){
+        if((key==257||key==335)&&source.isFocused()){importPreview();return true;}
+        if(isPaste(key,modifiers)&&!busy&&!saving&&pasteMedia())return true;
+        return super.keyPressed(key,scan,modifiers);
+    }
+    /** Cmd+V on macOS, Ctrl+V elsewhere, read from the event's modifiers like the rest of this key event. */
+    private static boolean isPaste(int key,int modifiers){
+        int shortcut=net.minecraft.client.Minecraft.ON_OSX?org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER:org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
+        return key==org.lwjgl.glfw.GLFW.GLFW_KEY_V&&(modifiers&(shortcut|org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT|org.lwjgl.glfw.GLFW.GLFW_MOD_ALT))==shortcut;
+    }
+    /** Loads a copied image or file. Copied text still pastes into the source box, or loads directly when the box isn't focused. */
+    private boolean pasteMedia(){
+        ClipboardMedia.Copied copied;
+        try{copied=ClipboardMedia.read();}catch(Exception e){showError(e);syncControls();return true;}
+        if(copied==null){
+            String text=minecraft.keyboardHandler.getClipboard().strip();
+            if(source.isFocused()||text.isEmpty()||text.contains("\n"))return false;
+            setSource(text);importPreview();return true;
+        }
+        if(copied.file()!=null){setSource(copied.file().toString());importPreview();return true;}
+        busy=true;status=text("status.loading");errorDetail=null;syncControls();
+        Path folder=minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache/clipboard");
+        job=WORKER.submit(()->{
+            try{Path file=copied.save(folder);minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;setSource(file.toString());importPreview();});}
+            catch(Exception e){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(e);syncControls();});}
+        });
+        return true;
+    }
     @Override public void tick(){
         super.tick();
         if(editorRetryTicks>0&&--editorRetryTicks==0&&original==null&&!fresh&&!busy)control("edit");
