@@ -4,7 +4,6 @@ import com.google.gson.*;
 import java.io.*;
 import java.net.URI;
 import java.nio.file.*;
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -17,29 +16,31 @@ final class YouTubeImport {
         try {String host=URI.create(source).getHost();return host!=null && Set.of("youtube.com","www.youtube.com","m.youtube.com","youtu.be","www.youtube-nocookie.com").contains(host.toLowerCase(Locale.ROOT));}
         catch(IllegalArgumentException e){return false;}
     }
-    private static Path verified(Path cache,String name,String url,String digest,boolean zipped) throws Exception {
+    private static Path verified(Path cache,String name,String url,String digest,boolean zipped,Consumer<String> status) throws Exception {
         Path root=cache.resolve(name),exe=root.resolve(System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")?name.startsWith("deno")?"deno.exe":"yt-dlp.exe":name.startsWith("deno")?"deno":"yt-dlp");
-        if(Files.isRegularFile(exe) && Files.isRegularFile(root.resolve("verified")))return exe;
+        Path ready=MediaTools.ready(root,exe.getFileName().toString());
+        if(ready!=null)return ready;
+        status.accept("youtube_tools");
         Files.createDirectories(root);Path archive=root.resolve("download.tmp");
         try {
-            MediaDecoder.download(URI.create(url),archive);
-            String actual=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(archive)));
-            if(!actual.equals(digest))throw new IOException("YouTube helper checksum did not match.");
+            MediaTools.fetch(url,archive,digest);
             if(zipped)try(var zip=new ZipInputStream(Files.newInputStream(archive))) {
                 boolean found=false;
                 for(var e=zip.getNextEntry();e!=null;e=zip.getNextEntry())if(e.getName().equals(exe.getFileName().toString())){Files.copy(zip,exe,StandardCopyOption.REPLACE_EXISTING);found=true;break;}
                 if(!found)throw new IOException("JavaScript runtime was missing from its archive.");
             } else Files.copy(archive,exe,StandardCopyOption.REPLACE_EXISTING);
             if(!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")&&!exe.toFile().setExecutable(true))throw new IOException("Cannot run YouTube helper.");
-            Files.writeString(root.resolve("verified"),actual);return exe;
+            MediaTools.seal(root);return exe;
         }finally{MediaDecoder.deleteTree(archive);}
     }
+    /** Words yt-dlp uses when it couldn't reach YouTube at all, as opposed to YouTube refusing the video. */
+    private static final List<String> NETWORK_ERRORS=List.of("TransportError","ProxyError","Unable to connect","Failed to resolve","getaddrinfo","timed out","CERTIFICATE_VERIFY_FAILED","SSLError","Connection refused","Network is unreachable");
     private static void run(List<String> command,Path temp,Path output,Path ffmpeg) throws Exception {
         Path errors=temp.resolve("youtube-errors.txt");
         var builder=new ProcessBuilder(command).redirectOutput(output.toFile()).redirectError(errors.toFile());
         builder.environment().put("LD_LIBRARY_PATH",ffmpeg.getParent().toString());
         builder.environment().put("DYLD_LIBRARY_PATH",ffmpeg.getParent().toString());
-        Process process=builder.start();long deadline=System.nanoTime()+TimeUnit.MINUTES.toNanos(3);
+        Process process=MediaTools.start(builder,Path.of(command.getFirst()).getParent());long deadline=System.nanoTime()+TimeUnit.MINUTES.toNanos(3);
         try {
             while(!process.waitFor(200,TimeUnit.MILLISECONDS)) {
                 if(Thread.currentThread().isInterrupted())throw new InterruptedException();
@@ -47,7 +48,11 @@ final class YouTubeImport {
                 long size=0;try(var files=Files.list(temp)){for(Path file:files.toList())if(Files.isRegularFile(file))size+=Files.size(file);}
                 if(size>LIMIT)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"YouTube import exceeds 100 MB.");
             }
-            if(process.exitValue()!=0)throw new IOException("YouTube could not provide this video. It may require sign-in, be restricted, or be unavailable. Try a direct media file.");
+            if(process.exitValue()!=0) {
+                String log=Files.isRegularFile(errors)?Files.readString(errors,java.nio.charset.StandardCharsets.UTF_8):"";
+                if(NETWORK_ERRORS.stream().anyMatch(log::contains))throw new MediaImportException(MediaImportException.Reason.NETWORK,"Cannot reach YouTube: "+log.strip(),"youtube.com",null);
+                throw new IOException("YouTube could not provide this video. It may require sign-in, be restricted, or be unavailable. Try a direct media file.");
+            }
         }finally{process.descendants().forEach(ProcessHandle::destroyForcibly);if(process.isAlive())process.destroyForcibly().waitFor();}
     }
     static void download(String source,int seconds,Path cache,Path temp,Path destination,Path ffmpeg,Consumer<String> status) throws Exception {
@@ -66,18 +71,17 @@ final class YouTubeImport {
             case "x86_64-pc-windows-msvc"->"a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238";
             default->"c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490";
         };
-        status.accept("Setting up verified YouTube helpers on first use...");
-        Path yt=verified(cache,"youtube-2026.08.19-"+asset,"https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/"+asset,hash,false);
-        Path deno=verified(cache,"deno-2.9.7-"+platform,"https://github.com/denoland/deno/releases/download/v2.9.7/deno-"+platform+".zip",denoHash,true);
+        Path yt=verified(cache,"youtube-2026.08.19-"+asset,"https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/"+asset,hash,false,status);
+        Path deno=verified(cache,"deno-2.9.7-"+platform,"https://github.com/denoland/deno/releases/download/v2.9.7/deno-"+platform+".zip",denoHash,true,status);
         var base=new ArrayList<>(List.of(yt.toString(),"--ignore-config","--no-playlist","--no-cache-dir","--no-progress","--no-warnings","--socket-timeout","20","--retries","2","--extractor-retries","2","--js-runtimes","deno:"+deno,"--ffmpeg-location",ffmpeg.toString()));
         var metadata=new ArrayList<>(base);metadata.addAll(List.of("--skip-download","--dump-single-json","--",source));
-        status.accept("Checking YouTube video...");Path json=temp.resolve("youtube.json");run(metadata,temp,json,ffmpeg);
+        status.accept("youtube_check");Path json=temp.resolve("youtube.json");run(metadata,temp,json,ffmpeg);
         JsonObject info=JsonParser.parseString(Files.readString(json)).getAsJsonObject();
         String live=info.has("live_status")&&!info.get("live_status").isJsonNull()?info.get("live_status").getAsString():"not_live";
         if(!Set.of("not_live","was_live").contains(live)||!info.has("duration")||info.get("duration").isJsonNull()||info.get("duration").getAsDouble()<=0)throw new IOException("Only recorded videos are supported. Live and upcoming streams cannot be imported.");
         var download=new ArrayList<>(base);
         download.addAll(List.of("-f","bv*[height<=480]/b[height<=480]/worst","--download-sections","*0-"+seconds,"--max-filesize","100M","--no-part","--no-mtime","-o",destination.toString(),"--",source));
-        status.accept("Downloading the first "+seconds+" seconds...");run(download,temp,temp.resolve("youtube-output.txt"),ffmpeg);
+        status.accept("youtube_download");run(download,temp,temp.resolve("youtube-output.txt"),ffmpeg);
         if(!Files.isRegularFile(destination)||Files.size(destination)>LIMIT)throw new IOException("YouTube video was unavailable or exceeded 100 MB.");
     }
 }
