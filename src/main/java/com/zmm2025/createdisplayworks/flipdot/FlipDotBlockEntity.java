@@ -28,8 +28,10 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     private long lastTick = Long.MIN_VALUE;
     private boolean wasPowered;
     private int boardWidth, boardHeight;
-    private BlockPos knownController;
-    private long[] knownMembers=new long[0];
+    /** This tile's {@link BoardCells cell} on its board when it last formed. */
+    private int boardCell=BoardCells.NONE;
+    /** On the controller: every cell of its board when it last formed, sorted. */
+    private int[] memberCells=new int[0];
     private String rowText = "";
     private boolean hasText, bitmapMode;
     private FlipDotAssembly assembly;
@@ -54,13 +56,17 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     @Override public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
     public FlipDotAssembly assembly() {
         if(level==null)return null;
-        if(knownController!=null) {
-            if(!level.hasChunkAt(knownController))return null;
-            if(level.getBlockEntity(knownController) instanceof FlipDotBlockEntity controller)
-                for(long member:controller.knownMembers)if(!level.hasChunkAt(BlockPos.of(member)))return null;
+        // Wait until the whole board as it last formed is loaded, so half of it doesn't look like a smaller board.
+        if(boardCell!=BoardCells.NONE) {
+            Direction right=right();
+            BlockPos controllerPos=FlipDotAssembly.offset(worldPosition,right,BoardCells.inverse(boardCell));
+            if(!level.hasChunkAt(controllerPos))return null;
+            if(level.getBlockEntity(controllerPos) instanceof FlipDotBlockEntity controller)
+                for(int member:controller.memberCells)if(!level.hasChunkAt(FlipDotAssembly.offset(controllerPos,right,member)))return null;
         }
         return FlipDotAssembly.find(level, worldPosition);
     }
+    private Direction right(){return FlipDotAssembly.right(getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING));}
     @Override public void initialize() {
         super.initialize();
         // Displays saved before connected borders load with every border showing.
@@ -83,17 +89,49 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
             tile.assembly = found;
             boolean controllerFlag=tile==found.controller();if(tile.soundController!=controllerFlag){tile.soundController=controllerFlag;tile.sendData();}
             tile.applyPalette(donor.backDye, donor.dye, donor.paletteSet);
-            if (tile != found.controller() && tile.media != null) tile.clearMedia();
         }
         var controller = found.controller();
-        long[] members=found.tiles().stream().mapToLong(t->t.worldPosition.asLong()).sorted().toArray();
-        if(controller.knownMembers.length>0 && !Arrays.equals(controller.knownMembers,members))controller.clearMedia();
-        controller.knownMembers=members;
-        for(var tile:found.tiles())tile.knownController=controller.worldPosition;
+        int[] cells=found.tiles().stream().mapToInt(t->found.cell(t.worldPosition)).toArray();
+        rearrange(found,cells);
+        for (FlipDotBlockEntity tile : found.tiles()) if (tile != controller && tile.media != null) tile.clearMedia();
+        int[] members=cells.clone();Arrays.sort(members);
+        if(controller.memberCells.length>0 && !Arrays.equals(controller.memberCells,members))controller.clearMedia();
+        controller.memberCells=members;
+        for(int i=0;i<cells.length;i++){var tile=found.tiles().get(i);tile.boardCell=cells[i];if(tile!=controller)tile.memberCells=new int[0];}
         if (controller.boardWidth != 0 && (controller.boardWidth != found.width() || controller.boardHeight != found.height())) controller.clearMedia();
         controller.boardWidth = found.width(); controller.boardHeight = found.height();
         found.controller().lastAssemblyScan = level.getGameTime();
         found.controller().rasterize(found);
+    }
+    /**
+     * When a whole board was turned upside down or mirrored, for example by a bearing or a pasted copy, its tiles swap
+     * places. Moves each cell's text, frame and media to the tile now in that cell, so the board keeps showing the same
+     * picture the right way up.
+     */
+    private static void rearrange(FlipDotAssembly found,int[] cells) {
+        var tiles=found.tiles();
+        int[] previous=tiles.stream().mapToInt(t->t.boardCell).toArray();
+        FlipDotBlockEntity oldController=null;
+        for(int i=0;i<previous.length;i++)if(previous[i]==BoardCells.ORIGIN)oldController=tiles.get(i);
+        if(oldController==null)return;
+        int[] source=BoardCells.rearrangement(previous,cells,oldController.memberCells);
+        if(source==null)return;
+        record Content(long pending,String rowText,boolean hasText,boolean bitmapMode){}
+        var content=tiles.stream().map(t->new Content(t.pending,t.rowText,t.hasText,t.bitmapMode)).toList();
+        for(int i=0;i<tiles.size();i++) {
+            var tile=tiles.get(i);var moved=content.get(source[i]);
+            tile.pending=moved.pending;tile.rowText=moved.rowText;tile.hasText=moved.hasText;tile.bitmapMode=moved.bitmapMode;tile.setChanged();
+        }
+        var controller=found.controller();
+        if(oldController!=controller){controller.memberCells=oldController.memberCells.clone();oldController.moveMediaTo(controller);}
+    }
+    private void moveMediaTo(FlipDotBlockEntity target) {
+        if(media==null)return;
+        target.clearMedia();
+        target.media=media;target.mediaId=mediaId;target.mediaArchive=mediaArchive;target.mediaFrame=mediaFrame;
+        target.mediaPlaying=mediaPlaying;target.mediaLoop=mediaLoop;target.playbackDelay=playbackDelay;
+        target.claimMedia();target.setChanged();
+        clearMedia();
     }
     private void rasterize(FlipDotAssembly group) {
         String[] lines = new String[group.height()];
@@ -281,8 +319,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         tag.putIntArray("Angles",encoded);tag.putFloat("MotionRPM",motion.speed());
         tag.putDouble("MotionTime",clientPacket?motion.anchor():0);if(clientPacket)tag.putDouble("SentTime",time);
         tag.putInt("PlaybackDelay",playbackDelay);tag.putBoolean("WasPowered",wasPowered);
-        if(knownController!=null)tag.putLong("KnownController",knownController.asLong());
-        tag.putLongArray("KnownMembers",knownMembers);
+        if(boardCell!=BoardCells.NONE)tag.putInt("BoardCell",boardCell);
+        tag.putIntArray("MemberCells",memberCells);
         tag.putString("RowText", rowText); tag.putBoolean("HasText", hasText); tag.putBoolean("BitmapMode", bitmapMode);
         if(!clientPacket && media!=null){if(mediaId!=null)tag.putString("MediaId",mediaId);else tag.putByteArray("MediaArchive",mediaArchive);tag.putInt("MediaFrame",mediaFrame);tag.putBoolean("MediaPlaying",mediaPlaying);tag.putBoolean("MediaLoop",mediaLoop);}
     }
@@ -298,8 +336,14 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         int[] encoded=tag.getIntArray("Angles");float[] angles=new float[64];
         for(int i=0;i<64;i++)angles[i]=encoded.length==64?Float.intBitsToFloat(encoded[i]):((displayed&(1L<<i))==0?180:0);
         motion.restore(angles,displayed,tag.getFloat("MotionRPM"),clientPacket?clientMotionTime(tag):0);
-        knownController=tag.contains("KnownController")?BlockPos.of(tag.getLong("KnownController")):null;knownMembers=tag.getLongArray("KnownMembers");
-        if(knownMembers.length>256)knownMembers=new long[0];
+        boardCell=tag.contains("BoardCell")&&BoardCells.valid(tag.getInt("BoardCell"))?tag.getInt("BoardCell"):BoardCells.NONE;memberCells=tag.getIntArray("MemberCells");
+        // Older saves link tiles by absolute position. Those are still right where the board was saved.
+        if(!tag.contains("BoardCell") && tag.contains("KnownController")) {
+            BlockPos controller=BlockPos.of(tag.getLong("KnownController"));Direction right=right();
+            boardCell=FlipDotAssembly.cell(worldPosition,controller,right);
+            memberCells=Arrays.stream(tag.getLongArray("KnownMembers")).mapToInt(m->FlipDotAssembly.cell(BlockPos.of(m),controller,right)).sorted().toArray();
+        }
+        if(memberCells.length>FlipDotAssembly.MAX_TILES || Arrays.stream(memberCells).anyMatch(c->!BoardCells.valid(c)))memberCells=new int[0];
         restoreClock=!clientPacket;wasPowered=tag.getBoolean("WasPowered");playbackDelay=Math.clamp(tag.getInt("PlaybackDelay"),0,20/MediaClip.FPS);
         String text = tag.getString("RowText"); rowText = text.substring(0, Math.min(512, text.length())); hasText = tag.getBoolean("HasText"); bitmapMode = tag.getBoolean("BitmapMode");
         if(!clientPacket){media=null;mediaId=null;mediaArchive=null;
