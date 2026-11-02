@@ -9,10 +9,12 @@ public record FlipDotAssembly(List<FlipDotBlockEntity> tiles, FlipDotBlockEntity
         int left, int top, int width, int height) {
     public static final int MAX_TILES = 256;
     public static final int MAX_SPAN = 32;
+    /** The direction columns run in, left to right as seen from the front of a board facing {@code facing}. */
+    public static Direction right(Direction facing) { return facing.getCounterClockWise(); }
     public static FlipDotAssembly find(LevelAccessor level, BlockPos start) {
         if (!(level.getBlockEntity(start) instanceof FlipDotBlockEntity first)) return null;
         Direction facing = first.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING);
-        Direction right = facing.getCounterClockWise();
+        Direction right = right(facing);
         List<FlipDotBlockEntity> tiles = new ArrayList<>();
         Set<BlockPos> seen = new HashSet<>(); ArrayDeque<BlockPos> queue = new ArrayDeque<>(); queue.add(start);
         while (!queue.isEmpty()) {
@@ -36,4 +38,15 @@ public record FlipDotAssembly(List<FlipDotBlockEntity> tiles, FlipDotBlockEntity
     private static int coordinate(BlockPos pos, Direction direction) { return pos.getX() * direction.getStepX() + pos.getZ() * direction.getStepZ(); }
     public int column(BlockPos pos) { return coordinate(pos, right) - left; }
     public int row(BlockPos pos) { return top - pos.getY(); }
+    /** The tile's {@link BoardCells cell} relative to the controller. */
+    public int cell(BlockPos pos) { return cell(pos, controller.getBlockPos(), right); }
+    /** The {@link BoardCells cell} of {@code pos} on a board whose controller is at {@code controller}, or {@link BoardCells#NONE} if it's out of reach. */
+    public static int cell(BlockPos pos, BlockPos controller, Direction right) {
+        int cell = BoardCells.pack(coordinate(pos, right) - coordinate(controller, right), controller.getY() - pos.getY());
+        return BoardCells.valid(cell) ? cell : BoardCells.NONE;
+    }
+    /** The position {@code cell} away from {@code from}, on a board whose columns run toward {@code right}. */
+    public static BlockPos offset(BlockPos from, Direction right, int cell) {
+        return from.relative(right, BoardCells.column(cell)).below(BoardCells.row(cell));
+    }
 }
