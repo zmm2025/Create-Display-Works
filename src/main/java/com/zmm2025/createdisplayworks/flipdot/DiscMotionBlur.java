@@ -39,6 +39,6 @@ final class DiscMotionBlur {
         }
     }
     static void render(FlipDotRenderer renderer, FlipDotBlockEntity be, float partial, PoseStack pose, VertexConsumer vertices, int light, int overlay) {
-        ghosts(be, partial, (index, angle, alpha) -> renderer.disc(be, pose, vertices, index / 8, index % 8, angle, alpha, 2, light, overlay));
+        ghosts(be, partial, (index, angle, alpha) -> renderer.disc(be, pose, vertices, index / 8, index % 8, angle, alpha, 2, -1, light, overlay));
     }
 }

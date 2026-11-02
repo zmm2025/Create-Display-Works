@@ -5,9 +5,11 @@ import com.mojang.math.Axis;
 import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
 import net.createmod.catnip.render.CachedBuffers;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.*;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 /**
@@ -21,8 +23,12 @@ public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEnti
     };
     static final float[][] NORMALS = {{0,0,-1},{0,0,1},{-1,0,0},{1,0,0},{0,1,0},{0,-1,0}};
     static final int EDGE = 0x2F3130;
+    /** Beyond this many blocks, disc edges are a small fraction of a pixel wide, so they're left out. */
+    private static final double EDGE_DISTANCE = 16;
     private final Quaternionf rotation = new Quaternionf();
     public FlipDotRenderer(BlockEntityRendererProvider.Context context) { super(context); }
+    /** Flywheel draws boards as far as chunks render, so this does too, instead of stopping at 64 blocks. */
+    @Override public int getViewDistance() { return Minecraft.getInstance().options.getEffectiveRenderDistance() * 16; }
     @Override protected void renderSafe(FlipDotBlockEntity be, float partial, PoseStack pose, MultiBufferSource buffers, int light, int overlay) {
         be.startClientMotion(partial);
         renderRotatingBuffer(be, CachedBuffers.partialFacingVertical(AllPartialModels.SHAFTLESS_COGWHEEL,
@@ -32,17 +38,27 @@ public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEnti
         pose.mulPose(Axis.YP.rotationDegrees(180 - be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING).toYRot()));
         pose.translate(-.5, -.5, -.5);
         VertexConsumer vertices = buffers.getBuffer(RenderType.entityCutout(WHITE));
-        for (int row = 0; row < 8; row++) for (int col = 0; col < 8; col++)
-            disc(be, pose, vertices, row, col, be.angle(row * 8 + col, partial), 255, 6, light, overlay);
+        boolean edges = be.isVirtual() || Minecraft.getInstance().gameRenderer.getMainCamera().getPosition()
+            .distanceToSqr(Vec3.atCenterOf(be.getBlockPos())) < EDGE_DISTANCE * EDGE_DISTANCE;
+        for (int row = 0; row < 8; row++) for (int col = 0; col < 8; col++) {
+            float angle = be.angle(row * 8 + col, partial);
+            // A settled disc's inner face lies against the board, so nothing can see it.
+            int hidden = angle < .01f ? 1 : angle > 179.99f ? 0 : -1;
+            disc(be, pose, vertices, row, col, angle, 255, edges ? 6 : 2, hidden, light, overlay);
+        }
         if (DiscMotionBlur.active(be, partial)) DiscMotionBlur.render(this, be, partial, pose, buffers.getBuffer(RenderType.entityTranslucent(WHITE)), light, overlay);
         pose.popPose();
     }
-    /** Draws the first {@code faces} faces of each plate: front and back come first, then the four thin edges. */
-    void disc(FlipDotBlockEntity be, PoseStack pose, VertexConsumer vertices, int row, int col, float angle, int alpha, int faces, int light, int overlay) {
+    /**
+     * Draws the first {@code faces} faces of each plate, except face {@code hidden} (-1 for none): front and back come
+     * first, then the four thin edges.
+     */
+    void disc(FlipDotBlockEntity be, PoseStack pose, VertexConsumer vertices, int row, int col, float angle, int alpha, int faces, int hidden, int light, int overlay) {
         pose.pushPose();
         pose.translate((15 - col * 2) / 16f, (15 - row * 2) / 16f, 4.5f / 16);
         pose.mulPose(rotation.rotationAxis((float)Math.toRadians(angle), .70710677f, .70710677f, 0));
         for (float[][] plate : PLATES) for (int face = 0; face < faces; face++) {
+            if (face == hidden) continue;
             float[] normal = NORMALS[face];
             quad(pose,vertices,plate[face],normal[0],normal[1],normal[2],face==0?be.discColor():face==1?be.backColor():EDGE,alpha,light,overlay);
         }
