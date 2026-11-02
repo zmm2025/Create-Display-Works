@@ -226,8 +226,8 @@ public final class DevTools {
             message = RELOADED;
         }
         minecraft.execute(() -> {
-            ChatFormatting colour = status.equals("reloaded") ? ChatFormatting.GREEN : status.equals("no-changes") ? ChatFormatting.GRAY : ChatFormatting.GOLD;
-            minecraft.gui.getChat().addMessage(Component.literal("[Dev] ").withStyle(ChatFormatting.DARK_AQUA).append(Component.literal(message).withStyle(colour)));
+            ChatFormatting color = status.equals("reloaded") ? ChatFormatting.GREEN : status.equals("no-changes") ? ChatFormatting.GRAY : ChatFormatting.GOLD;
+            minecraft.gui.getChat().addMessage(Component.literal("[Dev] ").withStyle(ChatFormatting.DARK_AQUA).append(Component.literal(message).withStyle(color)));
             for(String line : details) minecraft.gui.getChat().addMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
         });
         JsonObject response = new JsonObject();

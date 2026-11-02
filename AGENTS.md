@@ -38,7 +38,7 @@ running; don't close or restart it while the user has its window shown.
 
 ## Driving the game
 
-You control the `Dev` player through the game's localhost API. Use it to build test setups, verify behaviour and
+You control the `Dev` player through the game's localhost API. Use it to build test setups, verify behavior and
 capture demos. Endpoints are listed under "Agent control API" in DEVELOPMENT.md.
 
 - To start this worktree's game, run `./gradlew devStart -PthreadId=<your T3 Code thread id>` (T3's thread tools give
@@ -77,6 +77,21 @@ Don't use computer use for this. Keep these rules in mind:
 - Prefer verifying with `/status`, command output (`execute if block ...`, `data get ...`) and screenshots before you
   claim something works in-game.
 - In PowerShell, call `curl.exe`, not `curl`.
+
+## Language
+
+- Write chat replies, code, comments, docs, commit messages and PR text in American English (color, behavior,
+  center, gray). Names that come from Minecraft, NeoForge or Create keep their own spelling, such as
+  `BlockBehaviour` or `setColour`.
+- `en_us.json` is the mod's source language. Write every player-facing string there in American English, even when
+  you match Create's wording, since Create's own lang file mixes spellings. Other locale files, such as `en_gb.json`,
+  follow their own locale's spelling and conventions.
+- Never hard-code text a player can see or hear. Put it in `en_us.json` and use `Component.translatable` with
+  arguments for numbers and names, not `Component.literal` or string concatenation. This covers screen labels,
+  buttons, tooltips, hints, status and error text, chat and action-bar messages, subtitles, config option names,
+  and file dialog titles (pass them through `.getString()`). When the server sends text for the client to show, send
+  a lang key, not an English sentence, so each player sees their own language. Proper names, file format names and
+  player-entered text can stay literal. Log, exception and dev-tool text that players never see can stay in code.
 
 ## Branch names
 

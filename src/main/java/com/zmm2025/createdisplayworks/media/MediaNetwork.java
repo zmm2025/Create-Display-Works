@@ -21,6 +21,9 @@ public final class MediaNetwork {
     private static final Map<UUID,Upload> UPLOADS=new HashMap<>();
     private static final Map<UUID,Long> EDIT_REQUESTS=new HashMap<>();
     private static final Map<UUID,Long> IMPORT_REQUESTS=new HashMap<>();
+    /** Status messages are lang keys, so the client shows them in its own language. */
+    public static final String SAVED=message("saved");
+    private static String message(String name){return "message."+CreateDisplayWorks.MOD_ID+".media."+name;}
     public static void registerLifecycle(){
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent e)->{
             UUID id=e.getEntity().getUUID();UPLOADS.remove(id);EDIT_REQUESTS.remove(id);IMPORT_REQUESTS.remove(id);
@@ -77,12 +80,11 @@ public final class MediaNetwork {
         registrar.playToServer(Control.TYPE,Control.CODEC,(p,c)->{
             var be=editable((ServerPlayer)c.player(),p.pos);if(be==null)return;var group=be.assembly();if(group==null)return;
             if(p.action.equals("edit")){if(!allow(EDIT_REQUESTS,(ServerPlayer)c.player())){
-                PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,"Loading media",true,-2,false));return;
+                PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,"",true,-2,false));return;
             }var clip=group.controller().mediaForEditing();if(clip!=null)sendParts(p.pos,clip,part->PacketDistributor.sendToPlayer((ServerPlayer)c.player(),part));return;}
             if(p.action.equals("clear")){group.controller().clearMedia();for(int r=0;r<group.height();r++)group.controller().setLine(group,r,"");}
             else group.controller().mediaControl(p.action);
-            PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,
-                p.action.equals("status")?group.controller().mediaFilename()+" | "+group.controller().mediaFrameCount()+" frames. 10 FPS; rotation controls disc motion.":"Display updated: "+p.action,group.controller().mediaLoops(),group.controller().mediaFrameCount(),group.controller().mediaPlaybackEnabled()));
+            PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,"",group.controller().mediaLoops(),group.controller().mediaFrameCount(),group.controller().mediaPlaybackEnabled()));
         });
     }
     private static FlipDotBlockEntity editable(ServerPlayer player,BlockPos pos) {
@@ -92,18 +94,18 @@ public final class MediaNetwork {
     }
     private static void receive(Part p,ServerPlayer player) {
         UPLOADS.values().removeIf(u->u.expires<System.nanoTime());
-        var be=editable(player,p.pos);if(be==null){UPLOADS.remove(player.getUUID());PacketDistributor.sendToPlayer(player,new Status(p.pos,"Move closer to the display to apply media.",true));return;}
+        var be=editable(player,p.pos);if(be==null){UPLOADS.remove(player.getUUID());PacketDistributor.sendToPlayer(player,new Status(p.pos,message("too_far"),true));return;}
         var group=be.assembly();
         if(group==null||p.columns!=group.width()||p.rows!=group.height()||group.width()*group.height()>MediaClip.MAX_TILES||p.total<1||p.total>EditableMedia.MAX_BYTES
-            ||p.data.length<1||p.offset<0||p.offset>p.total-p.data.length){reject(player,p.pos,"The board changed or the upload was invalid. Import it again.");return;}
+            ||p.data.length<1||p.offset<0||p.offset>p.total-p.data.length){reject(player,p.pos,message("upload_invalid"));return;}
         if(p.offset==0) {
-            if(!allow(IMPORT_REQUESTS,player)){reject(player,p.pos,"Please wait a moment before importing again.");return;}
+            if(!allow(IMPORT_REQUESTS,player)){reject(player,p.pos,message("rate_limited"));return;}
             long reserved=UPLOADS.entrySet().stream().filter(e->!e.getKey().equals(player.getUUID())).mapToLong(e->(long)e.getValue().data.length).sum();
-            if(reserved+p.total>MediaLimits.UPLOAD_MIB.get()*1024L*1024){PacketDistributor.sendToPlayer(player,new Status(p.pos,"The server import queue is full. Try again shortly.",true));return;}
+            if(reserved+p.total>MediaLimits.UPLOAD_MIB.get()*1024L*1024){PacketDistributor.sendToPlayer(player,new Status(p.pos,message("queue_full"),true));return;}
             UPLOADS.put(player.getUUID(),new Upload(p,player));
         }
         var upload=UPLOADS.get(player.getUUID());
-        if(upload==null||upload.dimension!=player.level().dimension()||!upload.pos.equals(p.pos)||upload.w!=p.columns||upload.h!=p.rows||upload.data.length!=p.total||upload.received!=p.offset){reject(player,p.pos,"Upload interrupted. Import it again.");return;}
+        if(upload==null||upload.dimension!=player.level().dimension()||!upload.pos.equals(p.pos)||upload.w!=p.columns||upload.h!=p.rows||upload.data.length!=p.total||upload.received!=p.offset){reject(player,p.pos,message("upload_interrupted"));return;}
         System.arraycopy(p.data,0,upload.data,p.offset,p.data.length);upload.received+=p.data.length;
         if(upload.received==p.total) {
             UPLOADS.remove(player.getUUID());
@@ -114,8 +116,8 @@ public final class MediaNetwork {
                 boolean still=clip.count()==1;
                 player.displayClientMessage(still?Component.translatable("message.create_display_works.media_loaded_image")
                     :Component.translatable("message.create_display_works.media_loaded",clip.count()),true);
-                PacketDistributor.sendToPlayer(player,new Status(p.pos,still?"Saved 1 frame.":"Saved "+clip.count()+" frames.",true));
-            }catch(IllegalArgumentException e){PacketDistributor.sendToPlayer(player,new Status(p.pos,"Unable to save this media. Import it again.",true));}
+                PacketDistributor.sendToPlayer(player,new Status(p.pos,SAVED,true));
+            }catch(IllegalArgumentException e){PacketDistributor.sendToPlayer(player,new Status(p.pos,message("save_failed"),true));}
 
         }
     }

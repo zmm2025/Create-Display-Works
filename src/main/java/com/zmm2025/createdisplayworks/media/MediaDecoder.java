@@ -26,9 +26,9 @@ public final class MediaDecoder {
         "macosx-arm64","57b4cb109b60e246e0d55734bf83c9883bf9424df42816fa06af945549dba094");
     private MediaDecoder() {}
     private static String filename(String source) {
-        if(YouTubeImport.matches(source))return "YouTube video";
+        if(YouTubeImport.matches(source))return MediaClip.YOUTUBE;
         try {return Path.of(source.startsWith("http")?URI.create(source).getPath():source).getFileName().toString();}
-        catch(Exception e){return "Imported media";}
+        catch(Exception e){return MediaClip.UNNAMED;}
     }
     private static HttpClient http() {
         return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NORMAL).build();

@@ -18,7 +18,7 @@ final class DevCamera {
     private DevCamera() {}
 
     /**
-     * Looks at {@code x y z} (block coordinates aim at the block's centre; decimals aim at that exact point) from
+     * Looks at {@code x y z} (block coordinates aim at the block's center; decimals aim at that exact point) from
      * {@code distance} blocks off its {@code face}, by default the side the player is on. {@code fit=W} or
      * {@code fit=WxH} picks the distance that fits that many blocks across the view instead.
      */
