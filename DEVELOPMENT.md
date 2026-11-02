@@ -197,6 +197,12 @@ In Windows PowerShell, use `curl.exe`, because plain `curl` is an alias for `Inv
 - Use `/perf` before and after a rendering change, with the same view and display size, to compare frame times.
 - Use `/find` to locate a fixture's parts (motors, displays, gauges) instead of scanning coordinates one command at a
   time.
+- To check what the server does with media packets a modified client could send, type
+  `/flipdot_packet control <pos> <action>` or `/flipdot_packet upload <pos> <columns> <rows>` in chat. These dev-only
+  client commands send the packets without the media screen and log the server's replies with a `RAW_MEDIA` prefix in
+  the game's `logs/latest.log`. The server only accepts them for a display whose screen it opened for that player.
+  `/flipdot_packet connect <host:port>` leaves the world and joins a server, for testing as a non-op player on a
+  `runServer` with `online-mode=false`.
 - Create's kinetic blocks don't apply edits made with `data merge` to a running network. To change a creative motor's
   speed, replace it in one batch:
   `["setblock X Y Z air", "setblock X Y Z create:creative_motor[facing=F]{ScrollValue:256}"]`.
