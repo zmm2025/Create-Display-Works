@@ -77,7 +77,9 @@ public class FlipDotVisual extends KineticBlockEntityVisual<FlipDotBlockEntity> 
     private void createDiscs() {
         palette = (long)blockEntity.discColor() << 24 | blockEntity.backColor();
         var instancer = instancerProvider().instancer(InstanceTypes.TRANSFORMED, DISCS.get(palette));
-        for (int i = 0; i < 64; i++) discs[i] = instancer.createInstance();
+        // Hidden until beginFrame places them. A board created out of view would otherwise draw all its discs at the
+        // render origin, near the camera, until it's first seen.
+        for (int i = 0; i < 64; i++) discs[i] = instancer.createInstance().setZeroTransform();
         shownSettled = false;
         java.util.Arrays.fill(shown, Float.NaN);
     }
