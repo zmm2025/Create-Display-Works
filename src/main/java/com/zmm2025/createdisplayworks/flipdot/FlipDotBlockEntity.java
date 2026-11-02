@@ -16,6 +16,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public static java.util.function.Consumer<FlipDotBlockEntity> clientTick=be->{};
     private static final int BROADCAST_DELAY=1;
     private boolean clientStartPending;
+    /** Client boards whose flip starts on the next frame. */
+    private static final Set<FlipDotBlockEntity> PENDING_STARTS=Collections.newSetFromMap(new WeakHashMap<>());
     private double clientLag;
     private boolean soundController;
     private long displayed, pending, flipStarted;
@@ -261,17 +263,24 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         double start=tag.getDouble("MotionTime"),sent=tag.contains("SentTime")?tag.getDouble("SentTime"):start;
         clientLag=Math.max(0,sent-start-BROADCAST_DELAY);
         if(level==null||!level.isClientSide)return sent-clientLag;
-        clientStartPending=true;
+        clientStartPending=true;PENDING_STARTS.add(this);
         return level.getGameTime()-clientLag;
     }
     /**
-     * Packets are handled partway through a client tick, so the flip restarts on the first frame that draws it, using
-     * that frame's exact time.
+     * Packets are handled partway through a client tick, so the flip restarts on the next frame, using that frame's
+     * exact time. {@link #startPendingClientMotion} does this before each frame, so boards that aren't drawn, because
+     * they're off screen or a culling mod hid them, don't wait until they come into view.
      */
     public void startClientMotion(float partial) {
         if(!clientStartPending||level==null)return;
         clientStartPending=false;
         motion.reanchor(level.getGameTime()+partial-clientLag);
+    }
+    /** Starts every flip that arrived since the last frame. Call before each frame with the partial tick it draws. */
+    public static void startPendingClientMotion(float partial) {
+        if(PENDING_STARTS.isEmpty())return;
+        for(var board:PENDING_STARTS)board.startClientMotion(partial);
+        PENDING_STARTS.clear();
     }
     @Override protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
