@@ -28,6 +28,10 @@ public final class ClientEvents {
             if(net.minecraft.client.Minecraft.getInstance().screen instanceof com.zmm2025.createdisplayworks.media.MediaScreen screen)screen.updateStatus(data);
         };
     }
+    // Renderers only see boards they draw, so flips that arrived for hidden boards start here.
+    @SubscribeEvent public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Pre event) {
+        com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity.startPendingClientMotion(event.getPartialTick().getGameTimeDeltaPartialTick(false));
+    }
     @SubscribeEvent public static void renderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(ModContent.FLIP_DOT_ENTITY.get(), FlipDotRenderer::new);
     }

@@ -16,6 +16,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public static java.util.function.Consumer<FlipDotBlockEntity> clientTick=be->{};
     private static final int BROADCAST_DELAY=1;
     private boolean clientStartPending;
+    /** Client boards whose flip starts on the next frame. */
+    private static final Set<FlipDotBlockEntity> PENDING_STARTS=Collections.newSetFromMap(new WeakHashMap<>());
     private double clientLag;
     private boolean soundController;
     private long displayed, pending, flipStarted;
@@ -185,7 +187,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     @Override public void tick() {
         super.tick();
         if (level == null) return;
-        long now=level.getGameTime();
+        long now=clock();
         if(restoreClock){motion.restore(motion.snapshot(0),displayed,motion.speed(),now);restoreClock=false;}
         if(level.isClientSide){if(soundController)clientTick.accept(this);return;}
         // Tick gaps are unloaded time, not animation time.
@@ -233,7 +235,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     }
     public void showVirtualFrame(long bits,float rpm) {
         if(!isVirtual())return;
-        motion.retarget(bits,rpm,level.getGameTime());displayed=pending=bits;
+        motion.retarget(bits,rpm,clock());displayed=pending=bits;
     }
     public int discColor() { return dye.getTextureDiffuseColor() & 0xFFFFFF; }
     public int backColor() { return backDye.getTextureDiffuseColor() & 0xFFFFFF; }
@@ -241,10 +243,15 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     public long pendingBits() { return pending; }
     public long flipStarted() { return flipStarted; }
     public int flipDuration() { return duration; }
-    public int movingDiscs(float partial) { return motion.moving(level.getGameTime()+partial); }
+    public int movingDiscs(float partial) { return motion.moving(clock()+partial); }
     public float discSpeed() { return motion.speed(); }
-    public float angle(int index,float partial) { return motion.angle(index,level.getGameTime()+partial); }
-    public boolean discsSettled(float partial) { return motion.settled(level.getGameTime()+partial); }
+    public float angle(int index,float partial) { return motion.angle(index,clock()+partial); }
+    public boolean discsSettled(float partial) { return motion.settled(clock()+partial); }
+    /**
+     * The clock disc motion runs on. Ponder scenes keep their own time: opening Ponder pauses a singleplayer world, which
+     * stops level time, and scenes can be rewound and replayed.
+     */
+    private long clock() { return isVirtual() ? net.createmod.catnip.animation.AnimationTickHolder.getTicks(level) : level.getGameTime(); }
     public int motionVersion() { return motion.version(); }
     /**
      * Update packets are built in the server tick after a flip starts, and they reach the client later still. A 256 RPM
@@ -256,17 +263,24 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         double start=tag.getDouble("MotionTime"),sent=tag.contains("SentTime")?tag.getDouble("SentTime"):start;
         clientLag=Math.max(0,sent-start-BROADCAST_DELAY);
         if(level==null||!level.isClientSide)return sent-clientLag;
-        clientStartPending=true;
+        clientStartPending=true;PENDING_STARTS.add(this);
         return level.getGameTime()-clientLag;
     }
     /**
-     * Packets are handled partway through a client tick, so the flip restarts on the first frame that draws it, using
-     * that frame's exact time.
+     * Packets are handled partway through a client tick, so the flip restarts on the next frame, using that frame's
+     * exact time. {@link #startPendingClientMotion} does this before each frame, so boards that aren't drawn, because
+     * they're off screen or a culling mod hid them, don't wait until they come into view.
      */
     public void startClientMotion(float partial) {
         if(!clientStartPending||level==null)return;
         clientStartPending=false;
         motion.reanchor(level.getGameTime()+partial-clientLag);
+    }
+    /** Starts every flip that arrived since the last frame. Call before each frame with the partial tick it draws. */
+    public static void startPendingClientMotion(float partial) {
+        if(PENDING_STARTS.isEmpty())return;
+        for(var board:PENDING_STARTS)board.startClientMotion(partial);
+        PENDING_STARTS.clear();
     }
     @Override protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
@@ -274,7 +288,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         tag.putLong("FlipStarted", flipStarted); tag.putInt("FlipDuration", duration);
         tag.putInt("Dye", dye.getId());tag.putInt("BackDye",backDye.getId());tag.putBoolean("PaletteSet",paletteSet);
         tag.putBoolean("SoundController",soundController);tag.putInt("BoardWidth",boardWidth);tag.putInt("BoardHeight",boardHeight);
-        double time=level==null?0:level.getGameTime();
+        double time=level==null?0:clock();
         // Clients get the angles from the start of the current flip, not the angles at send time.
         float[] angles=motion.snapshot(clientPacket?motion.anchor():time);int[] encoded=new int[64];
         for(int i=0;i<64;i++)encoded[i]=Float.floatToIntBits(angles[i]);
