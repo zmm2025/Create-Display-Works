@@ -524,8 +524,10 @@ public final class DevTools {
         return onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
             if(minecraft.screen != null) {
-                minecraft.screen.keyPressed(key.getValue(), 0, held);
-                if(minecraft.screen != null) minecraft.screen.keyReleased(key.getValue(), 0, held);
+                // Through the keyboard handler, so mods that hook screen key events, such as EMI and JEI, see it too.
+                long window = minecraft.getWindow().getWindow();
+                minecraft.keyboardHandler.keyPress(window, key.getValue(), 0, org.lwjgl.glfw.GLFW.GLFW_PRESS, held);
+                if(minecraft.screen != null) minecraft.keyboardHandler.keyPress(window, key.getValue(), 0, org.lwjgl.glfw.GLFW.GLFW_RELEASE, held);
             } else KeyMapping.click(key);
             return ok();
         });

@@ -422,6 +422,7 @@ abstract class DevStartTask extends DefaultTask {
     @Input @Optional abstract Property<String> getThreadId()
     @Input @Optional abstract Property<String> getT3Cli()
     @Input abstract Property<String> getT3Home()
+    @Input @Optional abstract Property<String> getModsProfile()
 
     DevStartTask() {
         outputs.upToDateWhen { false }
@@ -433,16 +434,22 @@ abstract class DevStartTask extends DefaultTask {
         File checkoutDir = new File(checkout.get())
         if (!DevInstances.running(gameDir)) {
             new File(gameDir, 'dev-instance.json').delete()
+            boolean windows = System.getProperty('os.name').toLowerCase().contains('windows')
+            // The game's own Gradle run reads devModsProfile, so pass on one given to devStart.
+            List<String> args = ['runDevClient', '-PdevHidden']
+            if (modsProfile.present) args << "-PdevModsProfile=${modsProfile.get()}".toString()
+            String quoted = args.collect { String arg -> arg ==~ /[\w.:\/=-]+/ ? arg
+                    : "'" + (windows ? arg.replace("'", "''") : arg.replace("'", "'\"'\"'")) + "'" }.join(' ')
             boolean inTerminal = threadId.present && t3Cli.present && DevT3Terminal.run(t3Cli.get(), new File(t3Home.get()), threadId.get(),
-                    'minecraft', checkoutDir, DevT3Terminal.closingOnSuccess('./gradlew runDevClient -PdevHidden'), logger)
+                    'minecraft', checkoutDir, DevT3Terminal.closingOnSuccess("./gradlew ${quoted}".toString()), logger)
             if (inTerminal) {
                 logger.lifecycle("Starting Minecraft hidden in this thread's 'minecraft' terminal in T3 Code.")
             } else {
                 // Without T3 Code, run it in the background and keep its output in a log file.
                 File log = new File(gameDir, 'logs/dev-start.log')
                 log.parentFile.mkdirs()
-                String gradlew = System.getProperty('os.name').toLowerCase().contains('windows') ? 'gradlew.bat' : 'gradlew'
-                new ProcessBuilder(new File(checkoutDir, gradlew).absolutePath, 'runDevClient', '-PdevHidden')
+                String gradlew = windows ? 'gradlew.bat' : 'gradlew'
+                new ProcessBuilder([new File(checkoutDir, gradlew).absolutePath] + args)
                         .directory(checkoutDir).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.to(log)).start()
                 logger.lifecycle("Starting Minecraft hidden in the background; its output goes to ${log}.")
             }
@@ -594,6 +601,7 @@ tasks.register('devStart', DevStartTask) {
     gameDirectory = devInstanceDir.absolutePath
     checkout = projectDir.absolutePath
     threadId = providers.gradleProperty('threadId')
+    modsProfile = providers.gradleProperty('devModsProfile')
     t3Cli = providers.environmentVariable('T3CODE_CLI_PATH')
     t3Home = providers.environmentVariable('T3CODE_HOME').orElse(new File(System.getProperty('user.home'), '.t3').absolutePath)
 }
