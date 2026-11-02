@@ -38,7 +38,7 @@ final class DevInstance {
     private static final int HIDDEN_FPS = 30;
     private static volatile boolean hidden = Boolean.getBoolean("createdisplayworks.dev.hidden");
     private static volatile long lastRequest = System.currentTimeMillis();
-    private static boolean closing;
+    private static volatile boolean closing;
     private static int checkCount;
 
     private DevInstance() {}
@@ -85,6 +85,23 @@ final class DevInstance {
         JsonObject response = DevTools.ok();
         response.addProperty("hidden", !show);
         return response;
+    }
+
+    /**
+     * Closes the game the same way its window's close button does: it saves the world and exits normally, so the
+     * terminal it runs in closes too. {@code devStop} calls this.
+     */
+    static JsonObject quit() {
+        close("the control API asked it to");
+        return DevTools.ok();
+    }
+
+    private static void close(String reason) {
+        if(closing) return;
+        closing = true;
+        LOGGER.info("Closing the dev client because {}", reason);
+        Minecraft minecraft = Minecraft.getInstance();
+        minecraft.execute(minecraft::stop);
     }
 
     private static void setHidden(boolean hide) {
@@ -140,10 +157,7 @@ final class DevInstance {
             startCleanup(Path.of(worktree), gameDirectory);
         } else if(hidden && WORKTREE_INSTANCE && System.currentTimeMillis() - lastRequest > IDLE_LIMIT_MS)
             reason = "it was hidden with no agent activity for " + TimeUnit.MILLISECONDS.toMinutes(IDLE_LIMIT_MS) + " minutes";
-        if(reason == null) return;
-        closing = true;
-        LOGGER.info("Closing the dev client because {}", reason);
-        minecraft.execute(minecraft::stop);
+        if(reason != null) close(reason);
     }
 
     /**

@@ -34,8 +34,8 @@ Pick the line that fits, then adjust the wording to the change:
 | Window hidden, or no game running | 🚀 **Launch Minecraft to try these changes.** It shows a hidden game, or starts one. |
 | `DEV RELOAD: ERROR` | Explain what went wrong. |
 
-If a hidden game needs a restart, restart it yourself before you reply (close its `minecraft` terminal and run
-`devStart` again), so **Launch Minecraft** doesn't show the user old code. If you can't, say so in plain words
+If a hidden game needs a restart, restart it yourself before you reply (run `./gradlew devStop`, then `devStart`
+again), so **Launch Minecraft** doesn't show the user old code. If you can't, say so in plain words
 instead of asking the user to restart a game they never opened.
 
 When the user's game and your test game differ, say where each stands, for example that you tested it in this

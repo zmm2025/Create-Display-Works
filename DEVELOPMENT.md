@@ -14,18 +14,35 @@
 | `./gradlew devReload` | Compiles, then pushes code, assets and data into this checkout's running dev client. |
 | `./gradlew devReload -Pfull` | The same, but reloads all assets and data even if nothing changed. |
 | `./gradlew devStart -PthreadId=<id>` | For agents: starts this checkout's dev client with its window hidden, in a `minecraft` terminal in that T3 Code thread, and waits until it has joined its world. |
+| `./gradlew devStop` | Closes this checkout's dev client the way its close button does, saving the world. If it doesn't close within 2 minutes, it ends the process without saving. |
 
-In T3 Code, add these as project scripts (**Project settings â†’ Scripts**) so they're one click away. T3 stores
+In T3 Code, add these as project scripts (**Project settings → Scripts**) so they're one click away. T3 stores
 scripts in its own settings rather than reading them from the repo, so each developer adds them once. The scripts
 themselves only call the Gradle tasks above, so their behaviour lives in the repo:
 
-| Name | Command | Icon |
-| --- | --- | --- |
-| Launch Minecraft | `./gradlew runDevClient` | play |
-| Reload Minecraft | `./gradlew devReload` | build |
+| Name | Command | Icon | Option |
+| --- | --- | --- | --- |
+| Launch Minecraft | `./gradlew runDevClient; if ($LASTEXITCODE -eq 0) { exit }` | play | |
+| Reload Minecraft | `./gradlew devReload` | build | |
+| Stop Minecraft | `./gradlew devStop` | debug | **Run in the thread's worktree when the thread settles** |
+
+T3 Code's terminals run PowerShell on Windows. On macOS and Linux, use `./gradlew runDevClient && exit` for
+**Launch Minecraft**.
 
 Agents run `devReload` at the end of each turn that changes `src/` (see [AGENTS.md](AGENTS.md)), so the
 **Reload Minecraft** button is only a manual fallback. It replaces both F3+T and `/reload`.
+
+### Closing games and their terminals
+
+A terminal that's still open, even at an idle prompt, keeps T3 Code from cleaning up its worktree. So the game's
+terminal closes itself once the game exits normally, whether you close the window, `devStop` closes it, or it quits
+on its own. **Launch Minecraft** does this with the `exit` in its command, and `devStart` adds the same to the
+command it types into the `minecraft` terminal. If the build fails or the game crashes, the terminal stays open so
+you can read the error.
+
+When a thread in its own worktree settles, manually or automatically, T3 Code runs **Stop Minecraft** there. That
+closes the worktree's game, whether an agent started it or you launched it, and with it the game's terminal. T3 Code
+skips settle scripts for threads on the main checkout, so this never closes your main world's game.
 
 The client runs inside a Gradle daemon, so `./gradlew --stop` closes every running dev client without saving.
 
@@ -80,7 +97,7 @@ removed from it on the next launch, and jars you put there by hand are left alon
 Each checkout runs at most one game. An agent starts its worktree's game with `devStart`, which keeps the window
 hidden: it doesn't appear, take focus or show in the taskbar, and it's muted and limited to 30 FPS. Rendering,
 screenshots and the control API still work. The game runs in a terminal named `minecraft` in the agent's T3 Code
-thread; press Ctrl+J in that thread to see its console, or close that terminal to stop the game.
+thread; press Ctrl+J in that thread to see its console. Close that terminal, or run `devStop`, to stop the game.
 
 - **Launch Minecraft** in a checkout whose game is already running shows its window, with its sound and frame rate back
   to your settings, and follows its log instead of launching a second game. Stopping that console leaves the game
@@ -138,6 +155,7 @@ returns JSON with an `ok` field. Requests run one at a time.
 | --- | --- | --- |
 | `GET /status` | | Worktree, world, open screen, whether the window is hidden, window size and GUI scale, player position and rotation, held item and crosshair target. |
 | `POST /window` | `?show=true` or `?show=false` | Shows the window and brings it to the front, or hides it. |
+| `POST /quit` | | Closes the game the way its close button does, saving the world. It answers before the game has exited; `devStop` waits for that. |
 | `POST /command` | body: a command, with or without `/`, or a JSON array of steps | Runs the command as the player at permission level 4. Returns the chat output and whether it succeeded. An array runs its steps in order and returns `results`, one per step. A step is a command, `{"waitTicks": 20}`, or `{"waitUntil": "<command>", "timeoutTicks": 200}`, which reruns the command each tick until it succeeds and stops the batch if it never does. Consecutive commands run within one server tick. `tp` and `teleport` turn creative flight on first, so the player doesn't fall. |
 | `POST /screenshot` | `?hud=false` hides the HUD; `?frames=<n>&intervalMs=<ms>` (up to 600 frames, default interval 100 ms; `0` takes consecutive frames) captures a sequence; `&video=mp4` or `&video=gif` also encodes it | Saves PNGs under `screenshots/dev-tools/` in the game's folder and returns their paths. A sequence also returns `sheet`, one image with up to 36 evenly spread frames tiled left to right and top to bottom (`sheetFrames` lists which, when some are left out), `timesMs`, when each frame was taken, and `gameTimes`, the game time in ticks (with the partial tick) each frame drew. Frames are saved in the background, so a sequence doesn't slow the game down. `video` is made with ffmpeg and plays at the speed the frames were captured; an MP4 runs at 60 FPS and a GIF at 30 FPS, at most 960 pixels wide. With `hud=false`, an open chat is closed first; any other open screen still shows and is named in `screen`. |
 | `POST /camera` | `?x=&y=&z=`; optional `&face=north` (default: the side the player is on), `&distance=3` or `&fit=<W>` / `&fit=<W>x<H>`, `&screenshot=true`, `&hud=false` | Flies the player to look straight at that point from `distance` blocks off the given face, or far enough back that `W` by `H` blocks fill the view. Block coordinates aim at the block's centre; decimals aim at that exact point. Waits until the client has moved, and can take a screenshot in the same call. |

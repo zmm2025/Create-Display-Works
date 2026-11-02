@@ -41,6 +41,7 @@ final class DevControlServer {
             response = switch(exchange.getRequestURI().getPath()) {
                 case "/status" -> DevTools.status();
                 case "/window" -> DevInstance.window(!"false".equals(query.get("show")));
+                case "/quit" -> DevInstance.quit();
                 case "/reload" -> DevTools.reload(query.get("worktree"), Boolean.parseBoolean(query.get("full")));
                 case "/command" -> DevTools.command(body.isBlank() ? query.getOrDefault("command", "") : body);
                 case "/screenshot" -> DevTools.screenshot(!"false".equals(query.get("hud")),
