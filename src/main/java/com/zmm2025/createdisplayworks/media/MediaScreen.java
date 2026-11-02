@@ -238,7 +238,8 @@ public final class MediaScreen extends AbstractSimiScreen {
         int count=original!=null?original.frameCount(settings()):preview!=null?preview.count():1;
         if(++previewTicks>=count*2)previewTicks=loop?0:count*2-1;
     }
-    @Override public void removed(){if(job!=null&&!job.isDone())job.cancel(true);}
+    // Tells the server the screen is closed, so its packets stop acting on this display until it's opened again.
+    @Override public void removed(){if(job!=null&&!job.isDone())job.cancel(true);if(minecraft.getConnection()!=null)control("close");}
     private void well(GuiGraphics g,int x,int y,int w,int h){
         x+=guiLeft;y+=guiTop;g.fill(x-1,y-1,x+w+1,y+h+1,0xFF373737);g.fill(x,y,x+w,y+h,0xFF8B8B8B);g.fill(x,y+h,x+w+1,y+h+1,0xFFFFFFFF);g.fill(x+w,y,x+w+1,y+h+1,0xFFC6C6C6);
     }

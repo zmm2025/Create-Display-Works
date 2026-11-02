@@ -128,8 +128,7 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
             if(group!=null && group.width()*group.height()>com.zmm2025.createdisplayworks.media.MediaClip.MAX_TILES){
                 player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.create_display_works.media_canvas_limit"),true);return;
             }
-            if(group!=null) net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(serverPlayer,
-                new com.zmm2025.createdisplayworks.media.MediaNetwork.Open(pos,group.width(),group.height(),group.controller().mediaFilename(),group.controller().mediaThumbnail(),group.controller().mediaFrameCount(),group.controller().mediaPlaybackEnabled(),group.controller().mediaLoops()));
+            if(group!=null) com.zmm2025.createdisplayworks.media.MediaNetwork.open(serverPlayer,pos,group);
         });
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
