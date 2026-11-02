@@ -49,7 +49,7 @@ public final class ClipboardMedia {
         if(data.length>MAX_BYTES)throw tooLarge();
         String name=name(url);
         if(name==null&&html!=null){var image=IMAGE_SOURCE.matcher(html);if(image.find())name=name(image.group(1).replace("&amp;","&"));}
-        return new Copied(null,name!=null?name:extension.equals("gif")?"Pasted GIF":"Pasted image",extension,data);
+        return new Copied(null,name!=null?name:net.minecraft.network.chat.Component.translatable("screen.create_display_works.media.name."+(extension.equals("gif")?"pasted_gif":"pasted_image")).getString(),extension,data);
     }
     /** The file name, without its extension, at the end of a copied image's web or file address. */
     static String name(String url){

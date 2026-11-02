@@ -4,10 +4,12 @@ import java.util.Arrays;
 
 public record MediaClip(int columns, int rows, long[] frames, String filename, EditableMedia editable, MediaSettings settings) {
     public MediaClip(int columns,int rows,long[] frames,String filename){this(columns,rows,frames,filename,null,MediaSettings.DEFAULT);}
-    public MediaClip(int columns,int rows,long[] frames){this(columns,rows,frames,"Imported media");}
+    public MediaClip(int columns,int rows,long[] frames){this(columns,rows,frames,UNNAMED);}
+    /** Stored names for media without a file name. The media screen shows them translated. */
+    public static final String UNNAMED="Imported media", YOUTUBE="YouTube video";
     public static final int FPS=10, MAX_FRAMES=600, MAX_TILES=256;
     public MediaClip {
-        filename=filename==null?"Imported media":filename.codePoints().filter(c->c>=32 && c!=127).limit(128).collect(StringBuilder::new,StringBuilder::appendCodePoint,StringBuilder::append).toString();
+        filename=filename==null?UNNAMED:filename.codePoints().filter(c->c>=32 && c!=127).limit(128).collect(StringBuilder::new,StringBuilder::appendCodePoint,StringBuilder::append).toString();
         if(filename.length()>128)filename=filename.substring(0,Character.isHighSurrogate(filename.charAt(127))?127:128);
         if(settings==null)throw new IllegalArgumentException("Missing media settings");
         if(columns<1 || rows<1 || columns>32 || rows>32 || columns*rows>MAX_TILES
