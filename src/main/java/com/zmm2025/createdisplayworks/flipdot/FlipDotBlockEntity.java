@@ -142,13 +142,15 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
             int row = group.row(tile.worldPosition), col = group.column(tile.worldPosition);
             if (tile.hasText && col < firstColumn[row]) { firstColumn[row] = col; lines[row] = tile.rowText; }
         }
+        int[][] glyphs = new int[group.height()][];
         for (FlipDotBlockEntity tile : group.tiles()) {
             int row = group.row(tile.worldPosition);
             if (tile.bitmapMode) continue;
             if (firstColumn[row] != Integer.MAX_VALUE && (!tile.hasText || !tile.rowText.equals(lines[row]))) {
                 tile.hasText = true; tile.rowText = lines[row]; tile.setChanged();
             }
-            long bits = DotMatrix.tile(lines[row], group.column(tile.worldPosition), group.width() * 8);
+            if (glyphs[row] == null) glyphs[row] = DotMatrix.glyphs(lines[row]);
+            long bits = DotMatrix.tile(glyphs[row], group.column(tile.worldPosition), group.width() * 8);
             if (tile.pending != bits) { tile.pending = bits; tile.setChanged(); }
         }
     }

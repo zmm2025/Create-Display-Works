@@ -89,7 +89,7 @@ removed from it on the next launch, and jars you put there by hand are left alon
   usually adds Create as a dependency of Create addons, so addons must work with the Create version in
   [gradle.properties](gradle.properties).
 - To use another profile, or any folder of mod jars, set `devModsProfile=<profile name or absolute path>` in
-  `~/.gradle/gradle.properties` or pass `-PdevModsProfile=...`.
+  `~/.gradle/gradle.properties` or pass `-PdevModsProfile=...`. `devStart` passes it on to the game it starts.
 - Launching the profile itself from the Modrinth App doesn't include this mod. Use **Launch Minecraft** for that.
 
 ### Hidden games and switching in
@@ -165,7 +165,7 @@ returns JSON with an `ok` field. Requests run one at a time.
 | `GET /blockentity` | `?x=&y=&z=`; optional `&side=client\|server\|both`, `&fields=a,b.c`, `&all=true`, `&depth=2`, `&frames=<n>&intervalMs=<ms>` | The block entity's fields there, read by reflection on each side: this mod's own fields, or with `all=true` also those inherited from Create and vanilla (this mod's own objects are expanded `depth` levels). `fields` picks fields or dotted paths. With `frames`, the client side is sampled on that many rendered frames (up to 600; `intervalMs=0` takes every frame), each with its game time and partial tick, to follow animations. |
 | `POST /use` | optional `?x=&y=&z=&face=` | Right-clicks the crosshair target, or that block face. The player must be within reach. |
 | `POST /attack` | optional `?x=&y=&z=&face=` | Left-clicks: breaks the block in creative mode, or attacks the entity. |
-| `POST /key` | `?key=e` (GLFW names: `escape`, `enter`, `e`, `left.shift`, `f3`, ...); optional `&mods=shortcut,shift` (`shortcut` is Cmd on macOS and Ctrl elsewhere; also `ctrl`, `super`, `alt`) | Presses the key in the open screen, or as a game keybind when no screen is open. Modifiers only reach the screen's key event, so they don't work for checks that read the real keyboard, such as text boxes' own shortcuts. |
+| `POST /key` | `?key=e` (GLFW names: `escape`, `enter`, `e`, `left.shift`, `f3`, ...); optional `&mods=shortcut,shift` (`shortcut` is Cmd on macOS and Ctrl elsewhere; also `ctrl`, `super`, `alt`) | Presses and releases the key through the game's keyboard handler, like a real key press: in the open screen, where mods that hook screen keys, such as EMI's and JEI's recipe keys, see it too, or with no screen open as a game keybind or a key the game handles itself, such as Escape for the pause menu. Modifiers only reach the screen's key event, so they don't work for checks that read the real keyboard, such as text boxes' own shortcuts. |
 | `POST /type` | body: text | Types into the open screen. |
 | `POST /click` | `?x=&y=&button=0` | Moves the cursor to screenshot pixel coordinates in the open screen and clicks there. The cursor stays there, so later screenshots show that hover state. |
 | `POST /mouse` | `?x=&y=` | Moves the cursor in the open screen without clicking, to hover a widget for its tooltip. Coordinates outside the window, such as `?x=-1&y=-1`, park it so nothing is hovered. |

@@ -12,7 +12,6 @@ import com.zmm2025.createdisplayworks.CreateDisplayWorks;
 import com.zmm2025.createdisplayworks.dev.mixin.MouseHandlerAccessor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -523,10 +522,11 @@ public final class DevTools {
         int held = modifiers;
         return onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
-            if(minecraft.screen != null) {
-                minecraft.screen.keyPressed(key.getValue(), 0, held);
-                if(minecraft.screen != null) minecraft.screen.keyReleased(key.getValue(), 0, held);
-            } else KeyMapping.click(key);
+            // Through the keyboard handler, like a real key press: mods that hook screen keys, such as EMI and JEI, see
+            // it, and Escape opens the pause menu.
+            long window = minecraft.getWindow().getWindow();
+            minecraft.keyboardHandler.keyPress(window, key.getValue(), 0, org.lwjgl.glfw.GLFW.GLFW_PRESS, held);
+            minecraft.keyboardHandler.keyPress(window, key.getValue(), 0, org.lwjgl.glfw.GLFW.GLFW_RELEASE, held);
             return ok();
         });
     }

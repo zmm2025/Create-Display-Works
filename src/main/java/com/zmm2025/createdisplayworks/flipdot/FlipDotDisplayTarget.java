@@ -1,5 +1,6 @@
 package com.zmm2025.createdisplayworks.flipdot;
 
+import java.util.Arrays;
 import java.util.List;
 import com.simibubi.create.api.behaviour.display.DisplayTarget;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
@@ -13,10 +14,12 @@ public class FlipDotDisplayTarget extends DisplayTarget {
     @Override public void acceptText(int line, List<MutableComponent> text, DisplayLinkContext context) {
         FlipDotAssembly group = FlipDotAssembly.find(context.level(), context.getTargetPos());
         if (group == null) return;
-        for (int i = 0; i < text.size() && line + i < group.height(); i++) {
+        // Line breaks inside a line continue on the rows below, so they don't show up as unknown characters.
+        List<String> lines = text.stream().flatMap(component -> Arrays.stream(component.getString().split("\\R", -1))).toList();
+        for (int i = 0; i < lines.size() && line + i < group.height(); i++) {
             if (i > 0 && isReserved(line + i, group.controller(), context)) break;
             if (i == 0) reserve(line, group.controller(), context);
-            group.controller().setLine(group, line + i, text.get(i).getString());
+            group.controller().setLine(group, line + i, lines.get(i));
         }
     }
     @Override public DisplayTargetStats provideStats(DisplayLinkContext context) {
