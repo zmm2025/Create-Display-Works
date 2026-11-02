@@ -36,7 +36,7 @@ public final class MediaScreen extends AbstractSimiScreen {
     private int renderedFrame=-1;
     private long[] renderedBits;
     private String sourceValue="";
-    private Component status=Component.empty(),errorDetail;
+    private Component status=Component.empty(),errorDetail,progress,errorHint=text("empty.check_source");
     private int cutoff=128,seconds=60,savedFrames,previewTicks,saveTicks,editorRetryTicks;
     private boolean invert,dither,busy,dirty,fresh,playing=true,loop=true,saving;
     private MediaDecoder.Scale scale=MediaDecoder.Scale.STRETCH;
@@ -142,11 +142,12 @@ public final class MediaScreen extends AbstractSimiScreen {
     private void control(String action){PacketDistributor.sendToServer(new MediaNetwork.Control(pos,action));}
     public void importPreview(){
         if(busy||sourceValue.isBlank())return;
-        busy=true;status=text("status.loading");errorDetail=null;syncControls();
+        busy=true;status=text("status.loading");errorDetail=null;progress=null;syncControls();
         String input=sourceValue.strip();int duration=60,threshold=cutoff;boolean inverted=invert,ordered=dither;var sizingMode=scale;
         job=WORKER.submit(()->{
             try{
-                var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"),s->{});
+                var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"),
+                    step->minecraft.execute(()->{if(minecraft.screen==this&&busy)progress=text("progress."+step);}));
                 byte[] pixels=clip.editable()==null?null:clip.editable().pixels();
                 minecraft.execute(()->{if(minecraft.screen!=this)return;preview=clip;original=clip.editable();originalPixels=pixels;fresh=true;dirty=false;busy=false;playing=true;previewTicks=0;status=text("status.ready");init();setFocused(null);syncControls();});
             }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception);syncControls();});}
@@ -154,9 +155,28 @@ public final class MediaScreen extends AbstractSimiScreen {
     }
     private void showError(Exception error){
         String message=error.getMessage()==null?"":error.getMessage().toLowerCase(Locale.ROOT);
-        var reason=error instanceof MediaImportException known?known.reason():null;
-        status=text("status.load_failed");
-        errorDetail=text(reason==MediaImportException.Reason.NOT_FOUND?"error.not_found":reason==MediaImportException.Reason.TOO_LARGE?"error.too_large":reason==MediaImportException.Reason.TIMED_OUT?"error.timed_out":message.contains("youtube")?"error.youtube":"error.unreadable");
+        status=text("status.load_failed");errorHint=text("empty.check_source");
+        if(error instanceof MediaImportException known){
+            // Only some failures are the source's fault; the rest point at the connection or the details below.
+            errorHint=switch(known.reason()){
+                case NETWORK,TOOLS_DOWNLOAD->text("empty.check_connection");
+                case TOOLS_BLOCKED,UNSUPPORTED,CACHE->text("empty.see_status");
+                default->errorHint;
+            };
+            // The player sees a short hint; the log keeps the cause for bug reports.
+            if(known.reason()!=MediaImportException.Reason.NOT_FOUND&&known.reason()!=MediaImportException.Reason.TOO_LARGE)com.mojang.logging.LogUtils.getLogger().warn("Media import failed: {}",known.getMessage());
+            errorDetail=switch(known.reason()){
+                case NOT_FOUND->text("error.not_found");
+                case TOO_LARGE->text("error.too_large");
+                case TIMED_OUT->text("error.timed_out");
+                case NETWORK->text("error.network",known.detail());
+                case TOOLS_DOWNLOAD->text("error.tools_download",known.detail());
+                case TOOLS_BLOCKED->text("error.tools_blocked");
+                case UNSUPPORTED->text("error.unsupported",known.detail());
+                case CACHE->text("error.cache",known.detail());
+            };
+        }
+        else errorDetail=text(message.contains("youtube")?"error.youtube":"error.unreadable");
     }
     public void applyPreview(){
         if(busy||saving||!confirm.active)return;
@@ -280,8 +300,14 @@ public final class MediaScreen extends AbstractSimiScreen {
         int front=0xF9FFFE,back=0x1D1D21;
         if(minecraft.level!=null&&minecraft.level.getBlockEntity(pos) instanceof com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity tile){front=tile.discColor();back=tile.backColor();}
         g.fill(px,py,px+pw,py+ph,0xFF242424);
-        if(busy){AllIcons.I_REFRESH.render(g,px+56,py+30);g.drawCenteredString(font,text("status.loading"),px+64,py+54,0xD3C6BA);return;}
-        if(preview==null){AllIcons.I_SCHEMATIC.render(g,px+56,py+27);g.drawCenteredString(font,text(errorDetail==null?"empty.title":"status.load_failed"),px+64,py+51,0xD3C6BA);g.drawCenteredString(font,text(errorDetail==null?"empty.subtitle":"empty.check_source"),px+64,py+63,0x999999);return;}
+        if(busy){
+            AllIcons.I_REFRESH.render(g,px+56,py+30);
+            // First imports download helper programs for a while, so say what's happening and how much.
+            var lines=font.split(progress==null?text("status.loading"):progress,pw-8);
+            for(int i=0;i<Math.min(3,lines.size());i++)g.drawCenteredString(font,lines.get(i),px+64,py+54+i*10,0xD3C6BA);
+            return;
+        }
+        if(preview==null){AllIcons.I_SCHEMATIC.render(g,px+56,py+27);g.drawCenteredString(font,text(errorDetail==null?"empty.title":"status.load_failed"),px+64,py+51,0xD3C6BA);g.drawCenteredString(font,errorDetail==null?text("empty.subtitle"):errorHint,px+64,py+63,0x999999);return;}
         int w=columns*8,h=rows*8;float pixel=Math.min(pw/(float)w,ph/(float)h);int dw=Math.round(w*pixel),dh=Math.round(h*pixel);px+=(pw-dw)/2;py+=(ph-dh)/2;
         g.fill(px,py,px+dw,py+dh,0xFF000000|back);
         int count=original==null?preview.count():original.frameCount(settings());
