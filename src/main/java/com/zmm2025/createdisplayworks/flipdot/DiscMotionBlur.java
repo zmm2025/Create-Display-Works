@@ -17,9 +17,11 @@ final class DiscMotionBlur {
     private static final int PEAK_ALPHA = 110;
     private static final double MAX_DISTANCE = 24;
     private DiscMotionBlur() {}
-    /** True when the board is close enough and has discs that moved within the shutter time. */
+    /** True when the board is close enough, or in a Ponder scene, and has discs that moved within the shutter time. */
     static boolean active(FlipDotBlockEntity be, float partial) {
         if (!com.zmm2025.createdisplayworks.ClientConfig.MOTION_BLUR.get() || be.discsSettled(partial - SHUTTER_TICKS)) return false;
+        // Ponder scenes are viewed up close, and their positions aren't in the world the camera is in.
+        if (be.isVirtual()) return true;
         var camera = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
         return camera.distanceToSqr(Vec3.atCenterOf(be.getBlockPos())) <= MAX_DISTANCE * MAX_DISTANCE;
     }
