@@ -51,7 +51,27 @@ public final class FlipDotDev {
             .executes(c->{build(c.getSource().getPlayerOrException());return 1;})
             .then(Commands.literal("speed").then(Commands.argument("rpm",IntegerArgumentType.integer(-256,256)).executes(c->{speed(IntegerArgumentType.getInteger(c,"rpm"));return 1;})))
             .then(Commands.literal("text").then(Commands.argument("text",StringArgumentType.greedyString()).executes(c->{text(StringArgumentType.getString(c,"text"));return 1;})))
-            .then(Commands.literal("test").executes(c->{if(world==null)build(c.getSource().getPlayerOrException());started=world.getGameTime();stage=0;failures.clear();speed(32);text("32");return 1;})));
+            .then(Commands.literal("test").executes(c->{if(world==null)build(c.getSource().getPlayerOrException());started=world.getGameTime();stage=0;failures.clear();speed(32);text("32");return 1;}))
+            .then(Commands.literal("animate").then(Commands.argument("pos",net.minecraft.commands.arguments.coordinates.BlockPosArgument.blockPos())
+                .then(Commands.argument("pattern",StringArgumentType.word()).executes(c->animate(c.getSource(),
+                    net.minecraft.commands.arguments.coordinates.BlockPosArgument.getLoadedBlockPos(c,"pos"),StringArgumentType.getString(c,"pattern")))))));
+    }
+    /**
+     * Plays a generated clip on the board at {@code pos}, for render and performance testing: {@code stripes} scrolls
+     * diagonal stripes so some discs flip each frame, {@code invert} flips every disc each frame.
+     */
+    private static int animate(net.minecraft.commands.CommandSourceStack source,BlockPos pos,String pattern) {
+        if(!(source.getLevel().getBlockEntity(pos) instanceof FlipDotBlockEntity board) || board.assembly()==null){source.sendFailure(Component.literal("No flip-dot board there"));return 0;}
+        var group=board.assembly();int columns=group.width(),rows=group.height(),count=pattern.equals("invert")?2:16;
+        long[] frames=new long[columns*rows*count];
+        for(int f=0;f<count;f++)for(int tile=0;tile<columns*rows;tile++)for(int bit=0;bit<64;bit++){
+            int x=tile%columns*8+bit%8,y=tile/columns*8+bit/8;
+            boolean on=pattern.equals("invert")?(x+y+f)%2==0:Math.floorMod(x+y-f,16)<8;
+            if(on)frames[f*columns*rows+tile]|=1L<<bit;
+        }
+        group.controller().installMedia(new com.zmm2025.createdisplayworks.media.MediaClip(columns,rows,frames));
+        source.sendSuccess(()->Component.literal("Playing "+pattern+" on "+columns+"x"+rows+" boards"),false);
+        return 1;
     }
     // The fixture outlives its world otherwise, which keeps the closed level and player in memory.
     @SubscribeEvent public static void stopped(ServerStoppedEvent event) { world=null;viewer=null;origin=null;started=-1; }
