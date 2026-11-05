@@ -126,6 +126,14 @@ from a hidden one they started. It also reports edits that need a restart and ex
 (`DEV RELOAD: RESTART REQUIRED`) when it finds:
 
 - changed static initializers
+- new instance fields with a starting value (set where they're declared or in a constructor), in a class that has
+  live objects. Swapping adds the field to existing objects without running the constructor, so for them it stays
+  `null`, `0` or `false`, which can crash them every frame. The new class is still swapped in, so recreating the
+  objects (re-placing the block, reopening the screen) also fixes them, but the restart notice stays until you
+  restart. New fields without a starting value, or set to `null` or `0`, don't count. Neither do classes with no live
+  objects. Fields only set in a helper method that a constructor calls aren't detected. To check for live objects,
+  `devReload` counts them with the JVM's class histogram, which runs a full garbage collection and so can freeze the
+  game briefly.
 - added or removed `@SubscribeEvent` handlers
 - changed `@Mod`, `@EventBusSubscriber` or mixin classes
 - changed `META-INF` files

@@ -1,8 +1,13 @@
 package com.zmm2025.createdisplayworks.dev.tools;
 
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.util.Textifier;
 import org.objectweb.asm.util.TraceMethodVisitor;
@@ -13,11 +18,14 @@ import java.io.StringWriter;
 import java.io.UncheckedIOException;
 import java.lang.instrument.ClassDefinition;
 import java.lang.instrument.Instrumentation;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
+import javax.management.ObjectName;
 
 /**
  * Loader-agnostic half of hot reload: diffs compiled output against what the game last loaded, redefines changed
@@ -67,12 +75,15 @@ public final class HotReloader {
         List<String> redefined = new ArrayList<>(), notYetLoaded = new ArrayList<>();
         List<ClassDefinition> definitions = new ArrayList<>();
         List<String> unsafe = new ArrayList<>();
+        Map<Class<?>, List<String>> initializedFields = new LinkedHashMap<>();
         changedClasses.forEach((name, bytes) -> {
             Class<?> type = loaded.get(name);
             byte[] previous = loadedClasses.get(name);
             if(previous != null) pendingRestart.addAll(startupOnlyEdits(name, previous, bytes, type != null));
             if(type == null) { notYetLoaded.add(name); return; }
             if(previous != null) unsafe.addAll(lambdaShifts(name, previous, bytes));
+            List<String> fields = previous == null ? List.of() : addedInitializedFields(previous, bytes);
+            if(!fields.isEmpty()) initializedFields.put(type, fields);
             definitions.add(new ClassDefinition(type, bytes));
             redefined.add(name);
         });
@@ -82,8 +93,11 @@ public final class HotReloader {
             redefined.clear();
             pendingRestart.addAll(unsafe);
         } else try {
+            // Count before swapping, so a failed count can't leave the swap unreported.
+            List<String> uninitialized = uninitializedFields(instrumentation, initializedFields);
             if(!definitions.isEmpty()) instrumentation.redefineClasses(definitions.toArray(ClassDefinition[]::new));
             loadedClasses.putAll(changedClasses);
+            pendingRestart.addAll(uninitialized);
         } catch(Throwable e) {
             redefined.clear();
             pendingRestart.add("the JVM could not hot-swap " + definitions.size() + " class(es): " + e);
@@ -111,6 +125,89 @@ public final class HotReloader {
         if(annotations(now, STARTUP_ANNOTATIONS).contains("Lnet/neoforged/fml/common/Mod;") && !method(old, "<init>").equals(method(now, "<init>")))
             reasons.add(simple + " changed the mod constructor, which only runs at startup");
         return reasons;
+    }
+
+    /**
+     * Instance fields a class gained that its constructors give a starting value. Redefinition adds the field to
+     * objects that already exist without running any constructor, so on those it stays null, 0 or false. Fields only
+     * set to that default anyway ({@code = null}, {@code = 0}) are fine.
+     */
+    private static List<String> addedInitializedFields(byte[] before, byte[] after) {
+        ClassNode old = node(before), now = node(after);
+        Set<String> existing = new HashSet<>();
+        for(FieldNode field : old.fields) if((field.access & Opcodes.ACC_STATIC) == 0) existing.add(field.name + field.desc);
+        Set<String> added = new HashSet<>();
+        for(FieldNode field : now.fields)
+            if((field.access & Opcodes.ACC_STATIC) == 0 && !existing.contains(field.name + field.desc)) added.add(field.name + field.desc);
+        if(added.isEmpty()) return List.of();
+        Set<String> initialized = new TreeSet<>();
+        for(MethodNode method : now.methods) {
+            if(!method.name.equals("<init>")) continue;
+            for(AbstractInsnNode insn : method.instructions) {
+                if(!(insn instanceof FieldInsnNode put) || put.getOpcode() != Opcodes.PUTFIELD || !put.owner.equals(now.name)) continue;
+                if(added.contains(put.name + put.desc) && !storesDefault(put)) initialized.add(put.name);
+            }
+        }
+        return List.copyOf(initialized);
+    }
+
+    /**
+     * Whether the value a PUTFIELD stores is a constant null, 0 or false, which is what the field holds anyway. A label
+     * before the PUTFIELD means branches meet there ({@code a > b}, {@code ready ? x : null}), so the instruction before
+     * it is only one of the possible values.
+     */
+    private static boolean storesDefault(FieldInsnNode put) {
+        AbstractInsnNode value = put.getPrevious();
+        while(value != null && value.getOpcode() < 0) {
+            if(value instanceof LabelNode) return false;
+            value = value.getPrevious();
+        }
+        return value != null && switch(value.getOpcode()) {
+            case Opcodes.ACONST_NULL, Opcodes.ICONST_0, Opcodes.LCONST_0, Opcodes.FCONST_0, Opcodes.DCONST_0 -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Restart reasons for classes that gained initialized fields while objects of them (or of their subclasses) exist.
+     * Classes nobody has created an object of yet are fine, because new objects run the new constructors.
+     */
+    private static List<String> uninitializedFields(Instrumentation instrumentation, Map<Class<?>, List<String>> fields) {
+        if(fields.isEmpty()) return List.of();
+        Map<String, Long> counts = liveInstances();
+        Class<?>[] all = instrumentation.getAllLoadedClasses();
+        List<String> reasons = new ArrayList<>();
+        fields.forEach((type, names) -> {
+            long objects = 0;
+            for(Class<?> other : all) if(type.isAssignableFrom(other)) objects += counts == null ? 1 : counts.getOrDefault(other.getName(), 0L);
+            if(objects == 0) return;
+            String simple = type.getName().substring(type.getName().lastIndexOf('.') + 1);
+            String list = names.stream().map(n -> "'" + n + "'").collect(Collectors.joining(", "));
+            String existing = counts == null ? "existing " + simple + " objects" : "the " + objects + " existing " + simple + (objects == 1 ? " object" : " objects");
+            reasons.add(simple + " added " + (names.size() == 1 ? "the field " : "the fields ") + list + " with a starting value, but "
+                + existing + " won't have " + (names.size() == 1 ? "it" : "them") + " set and can crash. Restart, or re-create them (re-place the blocks, reopen the screens)");
+        });
+        return reasons;
+    }
+
+    /**
+     * Live object count per class name, from the JVM's class histogram (what {@code jcmd GC.class_histogram} prints).
+     * It runs a full GC, so it's only used when a reload adds initialized fields. Null if the JVM can't provide it.
+     */
+    private static Map<String, Long> liveInstances() {
+        try {
+            String histogram = (String) ManagementFactory.getPlatformMBeanServer().invoke(new ObjectName("com.sun.management:type=DiagnosticCommand"),
+                "gcClassHistogram", new Object[]{new String[0]}, new String[]{String[].class.getName()});
+            Map<String, Long> counts = new HashMap<>();
+            // Rows look like "   1:   12345   678900  com.example.Type (module@version)".
+            for(String line : histogram.split("\\R")) {
+                String[] columns = line.trim().split("\\s+");
+                if(columns.length >= 4 && columns[0].endsWith(":")) counts.merge(columns[3], Long.parseLong(columns[1]), Long::sum);
+            }
+            return counts;
+        } catch(Exception | LinkageError e) {
+            return null;
+        }
     }
 
     private static ClassNode node(byte[] bytes) {
