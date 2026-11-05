@@ -74,10 +74,41 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
     @Override public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
         return getRotationAxis(state) == Direction.Axis.Z ? box(0, 0, 3, 16, 16, 13) : box(3, 0, 0, 13, 16, 16);
     }
+    /**
+     * Whether a player may not change this board. Claim mods protect chunks, so a board that crosses a claim's border
+     * needs permission on both sides. They all cancel block breaking, which makes it a question any of them can answer.
+     */
+    private static boolean protectedFrom(Player player, Level level, FlipDotAssembly group) {
+        if (level.isClientSide || group == null) return false;
+        var chunks = new java.util.HashSet<Long>();
+        for (var tile : group.tiles()) {
+            BlockPos pos = tile.getBlockPos();
+            if (!chunks.add(net.minecraft.world.level.ChunkPos.asLong(pos))) continue;
+            if (net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.level.BlockEvent.BreakEvent(level, pos, tile.getBlockState(), player)).isCanceled()) {
+                player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.create_display_works.board_protected"), true);
+                return true;
+            }
+        }
+        return false;
+    }
+    /** Placing a tile joins the boards next to it, so it needs the same permission as changing them. */
+    private static boolean joinsProtectedBoard(BlockPlaceContext context, BlockState state) {
+        Player player = context.getPlayer();
+        if (player == null) return false;
+        Direction facing = state.getValue(HORIZONTAL_FACING);
+        for (Direction side : new Direction[]{facing.getClockWise(), facing.getCounterClockWise(), Direction.UP, Direction.DOWN}) {
+            BlockPos neighbor = context.getClickedPos().relative(side);
+            BlockState other = context.getLevel().getBlockState(neighbor);
+            if (other.getBlock() instanceof FlipDotBlock && other.getValue(HORIZONTAL_FACING) == facing
+                && protectedFrom(player, context.getLevel(), FlipDotAssembly.find(context.getLevel(), neighbor))) return true;
+        }
+        return false;
+    }
     @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
         BlockState behind = context.getLevel().getBlockState(context.getClickedPos().relative(context.getClickedFace().getOpposite()));
         BlockState state = behind.is(this) && (context.getPlayer() == null || !context.getPlayer().isShiftKeyDown())
             ? defaultBlockState().setValue(HORIZONTAL_FACING, behind.getValue(HORIZONTAL_FACING)) : super.getStateForPlacement(context);
+        if (joinsProtectedBoard(context, state)) return null;
         return connect(state.setValue(WATERLOGGED, context.getLevel().getFluidState(context.getClickedPos()).getType() == Fluids.WATER),
             context.getLevel(), context.getClickedPos());
     }
@@ -85,6 +116,8 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
             Player player, InteractionHand hand, BlockHitResult hit) {
         if (player.isShiftKeyDown() || !player.mayBuild()) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
         var helper = PlacementHelpers.get(PLACEMENT);
+        boolean edits = helper.matchesItem(stack) || DyeColor.getColor(stack) != null || stack.is(Items.NAME_TAG) && stack.has(DataComponents.CUSTOM_NAME) || AllBlocks.CLIPBOARD.isIn(stack);
+        if (edits && protectedFrom(player, level, FlipDotAssembly.find(level, pos))) return ItemInteractionResult.SUCCESS;
         if (helper.matchesItem(stack)) return helper.getOffset(player, level, state, pos, hit).placeInWorld(level, (BlockItem)stack.getItem(), player, hand, hit);
         FlipDotBlockEntity be = getBlockEntity(level, pos);
         if (be == null) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
@@ -125,6 +158,7 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
         if (!player.mayBuild() || player.isShiftKeyDown() || !player.getMainHandItem().isEmpty()) return InteractionResult.PASS;
         if (!level.isClientSide && player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) withBlockEntityDo(level, pos, be -> {
             var group=be.assembly();
+            if(protectedFrom(player,level,group))return;
             if(group!=null && group.width()*group.height()>com.zmm2025.createdisplayworks.media.MediaClip.MAX_TILES){
                 player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.create_display_works.media_canvas_limit"),true);return;
             }
