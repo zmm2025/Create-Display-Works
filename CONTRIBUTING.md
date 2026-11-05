@@ -22,7 +22,8 @@ even if your branch or fork is deleted, and puts it in the PR's **Preview** sect
 
 ### Uploading it
 
-1. Put the files in `build/pr-evidence/` with a `PREVIEW.md` that shows them, using paths relative to that folder:
+1. Put the files in `build/pr-evidence/` with a `PREVIEW.md` that shows them, using paths relative to that folder.
+   Files kept with the control API's `keep=<name>` can stay where they are: name them, and `prEvidence` copies them.
 
    ```markdown
    | Before | After |

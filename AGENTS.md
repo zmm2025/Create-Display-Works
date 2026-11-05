@@ -71,25 +71,40 @@ capture demos. Endpoints are listed under "Agent control API" in DEVELOPMENT.md.
   in a background shell command, which the user can't see.
 - The port is also in `build/dev-client.json`. Check that `/status` reports this worktree before trusting a result.
 - The window stays hidden unless the user shows it. Don't call `/window?show=true` yourself.
+- `./gradlew devRestart -PthreadId=<id>` restarts it. Add `-PdevModSet=rendering` (or `claims`, `addons`,
+  `interaction`, or several with commas) to test with other mods from a cache all worktrees share.
 
+Anything a player can do, you can do. Keep tests cheap: batch steps, read text instead of screenshots, and use
+fixtures instead of building by hand. "Agent control API" and "Testing tips" in DEVELOPMENT.md have the details.
 
-- `/command` runs commands as the player.
-- `/use`, `/attack`, `/key`, `/type` and `/click` send input. `/mouse` moves the cursor without clicking: hover a
-  widget to capture its tooltip, or park it at `x=-1&y=-1` so no hover state or tooltip covers a screenshot.
+- `/command` runs commands as the player, including client commands such as `flywheel backend`.
+- `/key`, `/click`, `/scroll`, `/mouse`, `/look` and `/type` send real input, in the world as well as in screens.
+  Add `action=down`, `action=up` or `ticks=<n>` to hold a key or button, and `mods=` to hold modifiers. Held input
+  also satisfies code that reads the physical keyboard.
+- Key bindings come from the user's settings, where sneak isn't shift. Use `mods=sneak` and `key=key.forward`.
+- `/use` and `/attack` act on a block or entity directly. Pass `holding=<item>` after changing the held item by
+  command, since that takes some ticks to reach the client. `/close` closes a screen; Escape with none open pauses.
+- `/screen`, `/chat` and `/entities` read what's on screen as text, so most checks need no screenshot.
+- `/fixture?name=board`, `contraption` or `train` builds a working setup in seconds and returns its coordinates.
+- `/options` changes game settings and puts them back. `/player` adds a second player, and `devServerStart` a
+  dedicated server, for permission tests.
 - `/status` and `/screenshot` let you check the result. Open the PNG it returns to look at it.
 - For anything that moves or changes over time, such as animations, rotating parts, flip-dot transitions or media
   playback, capture a frame sequence with `/screenshot?frames=<n>&intervalMs=<ms>` and open the contact sheet it
   returns. One still image can't show motion. Choose the interval from the effect's speed, for example 50-100 ms
   for a 10 FPS animation, and use `timesMs` for the actual capture times.
 - Delete screenshots and frame folders you no longer need from the `screenshots/dev-tools/` folder next to the PNGs.
+  Never delete kept images (see [Images in chat](#images-in-chat)).
 - `/sounds` shows what the game plays and how loud it reaches the player. Use it instead of recording audio.
 - `/blockentity` reads a block entity's fields on the client and server, and can sample them every frame. Use it
   instead of adding temporary debug logging.
-- Send several commands as one JSON array to `/command`, with `waitTicks` or `waitUntil` steps instead of `sleep`.
-  Use `/find` to locate blocks instead of scanning coordinates one command at a time.
+- Send several steps as one JSON array to `/command`, with `waitTicks` or `waitUntil` steps instead of `sleep`, and
+  `{"call": "/click?button=right"}` steps for any other endpoint. Use `/find` to locate blocks instead of scanning
+  coordinates one command at a time.
 - `/camera` flies the player to face a block or fit a whole display in view, and can screenshot in the same call. Use it
   instead of guessing teleport coordinates.
-- `/perf` measures frame times and the mod's render cost. Use it to check that large or many displays stay fast.
+- `/perf` measures frame times and the mod's render cost. Use it to check that large or many displays stay fast, with
+  `fps=unlimited` to lift the hidden game's 30 FPS cap.
 - Add `video=mp4` or `video=gif` to a frame sequence when the user wants a demo. "Testing tips" in DEVELOPMENT.md
   has more shortcuts.
 
@@ -100,6 +115,22 @@ Don't use computer use for this. Keep these rules in mind:
 - Prefer verifying with `/status`, command output (`execute if block ...`, `data get ...`) and screenshots before you
   claim something works in-game.
 - In PowerShell, call `curl.exe`, not `curl`.
+
+## Images in chat
+
+When a turn changes or reports on anything a player can see, the reply embeds before and after images, without being
+asked. Do this for each change, not one summary image. A text description doesn't replace an image.
+
+- Capture the before while the game still runs the old code, before your first edit. If a before image truly can't be
+  captured, say so.
+- Add `keep=<name>` to `/screenshot` or `/camera`. The response's `markdown` is ready to paste into your reply.
+- For motion, add `frames=<n>&intervalMs=<ms>&video=gif` to `/screenshot`. `keep` saves the GIF and its contact sheet.
+- Chat reads an image from disk every time it's shown, so a deleted file shows up broken. Kept images live in the
+  main checkout's `run/evidence/<worktree>/`, which survives the worktree. Never delete them, and embed nothing from
+  `screenshots/dev-tools/`, a scratch folder or `build/`. Copy an image from anywhere else into the `evidenceDirectory`
+  that `/status` reports first.
+- Open each image before you embed it. A wrong camera angle proves nothing.
+- Subagents capture the evidence and return the absolute image paths. The parent thread embeds them.
 
 ## Language
 
@@ -131,7 +162,7 @@ writes the PR text but can't capture or upload anything. So whenever a branch ch
 hear, keep its evidence uploaded and current, as [CONTRIBUTING.md](CONTRIBUTING.md#pr-evidence) describes. A
 workflow then puts it in the PR's Preview section.
 
-- Before your first edit, capture the before state, while the game still runs the old code.
+- Reuse the images you kept for chat (see [Images in chat](#images-in-chat)) instead of capturing them again.
 - Pick whatever shows the change best, in any format:
   - before and after screenshots for how something looks
   - a GIF (`/screenshot?...&video=gif`) for short motion, since it plays inline
@@ -140,9 +171,9 @@ workflow then puts it in the PR's Preview section.
   - links for anything else, such as changed sound files, `/sounds` or `/perf` output, or logs
   - nothing, when there's nothing to see
 - The control API records no audio. If hearing a sound matters, say so in your reply, so the user can record it.
-- Copy the files you choose from the game's `screenshots/dev-tools/` into `build/pr-evidence/`, write its
-  `PREVIEW.md`, and run `./gradlew prEvidence` before your final reply. Rerun it whenever later work changes what the
-  evidence shows, and remove files that no longer apply.
+- Write `build/pr-evidence/PREVIEW.md` and run `./gradlew prEvidence` before your final reply. A file it names that
+  isn't in that folder is copied from this worktree's kept images, so use their file names. Rerun it whenever later
+  work changes what the evidence shows, and remove files that no longer apply.
 - If the evidence has drop files, add a short note before your closing line that lists them, linked to their files in
   `build/pr-evidence/`, so the user can drag them into the PR once it's open.
 - Settle the branch name (see [Branch names](#branch-names)) before the first upload. After renaming the branch, run
