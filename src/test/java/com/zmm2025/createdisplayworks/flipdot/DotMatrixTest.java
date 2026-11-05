@@ -12,6 +12,10 @@ class DotMatrixTest {
         assertEquals(DotMatrix.tile("?",0,8),DotMatrix.tile("\uD83D\uDE00",0,8));
         assertEquals(DotMatrix.tile("32",0,16),DotMatrix.tile("32",0,32));
     }
+    @Test void unfilledGaugeBarsLookDifferentFromFilledOnes() {
+        assertNotEquals(DotMatrix.tile("||||",0,8),DotMatrix.tile("¦¦¦¦",0,8));
+        assertEquals(DotMatrix.glyphs("|").length,DotMatrix.glyphs("¦").length);
+    }
     @Test void displayLinkTextFoldsToDrawableGlyphs() {
         assertArrayEquals(DotMatrix.glyphs("Cafe Uber naive"), DotMatrix.glyphs("Caf\u00E9 \u00DCber na\u00EFve"));
         assertArrayEquals(DotMatrix.glyphs("\"Hi\" - it's 1/2..."), DotMatrix.glyphs("\u201CHi\u201D \u2013 it\u2019s \u00BD\u2026"));
