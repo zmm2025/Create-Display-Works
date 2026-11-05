@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -36,7 +37,11 @@ final class DevInstance {
     private static final long IDLE_LIMIT_MS = TimeUnit.MINUTES.toMillis(Long.getLong("createdisplayworks.dev.idleMinutes", 30));
     /** The frame rate a hidden game draws at; nobody sees it, and it shouldn't slow down the user's own game. */
     private static final int HIDDEN_FPS = 30;
+    /** The frame rate that stands for no limit in the game's settings. */
+    static final int UNLIMITED_FPS = 260;
     private static volatile boolean hidden = Boolean.getBoolean("createdisplayworks.dev.hidden");
+    /** Replaces {@link #HIDDEN_FPS} when set, so measurements aren't capped. */
+    private static volatile Integer fpsOverride;
     private static volatile long lastRequest = System.currentTimeMillis();
     private static volatile boolean closing;
     private static int checkCount;
@@ -78,13 +83,39 @@ final class DevInstance {
         return hidden;
     }
 
-    /** Shows the window and brings it to the front, or hides it again. */
-    static JsonObject window(boolean show) throws Exception {
+    /**
+     * Sets a hidden game's frame rate cap with {@code fps} ({@code default} undoes it), resizes the window with
+     * {@code width} and {@code height}, and with {@code show}, or no other parameter, shows it and brings it to the
+     * front, or hides it again.
+     */
+    static JsonObject window(Map<String, String> query) throws Exception {
         Minecraft minecraft = Minecraft.getInstance();
-        minecraft.submit(() -> setHidden(!show)).get(1, TimeUnit.MINUTES);
         JsonObject response = DevTools.ok();
-        response.addProperty("hidden", !show);
+        if(query.containsKey("fps")) {
+            fps(query.get("fps").equals("default") ? null : query.get("fps").equals("unlimited") ? Integer.valueOf(UNLIMITED_FPS) : Integer.valueOf(query.get("fps")));
+            response.addProperty("fpsLimit", fpsOverride == null ? HIDDEN_FPS : fpsOverride);
+        }
+        if(query.containsKey("width") || query.containsKey("height")) {
+            Window window = minecraft.getWindow();
+            int width = Integer.parseInt(query.getOrDefault("width", Integer.toString(window.getScreenWidth())));
+            int height = Integer.parseInt(query.getOrDefault("height", Integer.toString(window.getScreenHeight())));
+            minecraft.submit(() -> GLFW.glfwSetWindowSize(window.getWindow(), width, height)).get(1, TimeUnit.MINUTES);
+        }
+        if(query.isEmpty() || query.containsKey("show")) {
+            boolean show = !"false".equals(query.get("show"));
+            minecraft.submit(() -> setHidden(!show)).get(1, TimeUnit.MINUTES);
+            response.addProperty("hidden", !show);
+        }
         return response;
+    }
+
+    /** Sets the hidden frame rate cap; null restores the default. The next client tick applies it. */
+    static void fps(Integer limit) {
+        fpsOverride = limit;
+    }
+
+    static Integer fps() {
+        return fpsOverride;
     }
 
     /**
@@ -115,6 +146,7 @@ final class DevInstance {
             GLFW.glfwShowWindow(handle);
             if(GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_ICONIFIED) == GLFW.GLFW_TRUE) GLFW.glfwRestoreWindow(handle);
             GLFW.glfwFocusWindow(handle);
+            DevInput.windowShown();
         }
         hidden = hide;
         throttle(window, hide);
@@ -139,7 +171,7 @@ final class DevInstance {
         if(!hidden) return;
         Minecraft minecraft = Minecraft.getInstance();
         Window window = minecraft.getWindow();
-        int limit = Math.min(HIDDEN_FPS, minecraft.options.framerateLimit().get());
+        int limit = fpsOverride != null ? fpsOverride : Math.min(HIDDEN_FPS, minecraft.options.framerateLimit().get());
         if(window.getFramerateLimit() != limit) window.setFramerateLimit(limit);
         minecraft.getSoundManager().updateSourceVolume(SoundSource.MASTER, 0);
     }

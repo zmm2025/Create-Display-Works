@@ -1,8 +1,14 @@
 package com.zmm2025.createdisplayworks.dev.tools;
 
+import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.PresetFlatWorldScreen;
+import net.minecraft.client.gui.screens.ReceivingLevelScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -20,6 +26,9 @@ import net.minecraft.world.level.levelgen.flat.FlatLevelGeneratorSettings;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
+
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /** Opens the shared dev test world on launch, creating it with the standard test settings if it doesn't exist yet. */
 final class DevWorld {
@@ -40,6 +49,57 @@ final class DevWorld {
             if(minecraft.getLevelSource().levelExists(NAME)) minecraft.createWorldOpenFlows().openWorld(NAME, () -> minecraft.setScreen(new TitleScreen()));
             else create(minecraft);
         });
+    }
+
+    /**
+     * Leaves the current world, if any, and joins {@code host} (a server address) or {@code world} (a saved world, by
+     * default the test world), returning once the player is in. Joining a server tests what that server lets the
+     * player do, for example without operator permissions.
+     */
+    static JsonObject connect(Map<String, String> query) throws Exception {
+        Minecraft minecraft = Minecraft.getInstance();
+        String host = query.get("host"), world = query.getOrDefault("world", NAME);
+        minecraft.submit(() -> {
+            leave(minecraft);
+            if(host != null) ConnectScreen.startConnecting(new TitleScreen(), minecraft, ServerAddress.parseString(host),
+                new ServerData("Test server", host, ServerData.Type.OTHER), false, null);
+            else minecraft.createWorldOpenFlows().openWorld(world, () -> minecraft.setScreen(new TitleScreen()));
+        }).get(2, TimeUnit.MINUTES);
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
+        while(System.nanoTime() < deadline) {
+            boolean joined = minecraft.submit(() -> minecraft.player != null && minecraft.level != null && minecraft.getOverlay() == null
+                && !(minecraft.screen instanceof ReceivingLevelScreen) && !(minecraft.screen instanceof ConnectScreen)).get(1, TimeUnit.MINUTES);
+            if(joined) return DevTools.status();
+            if(minecraft.submit(() -> minecraft.screen instanceof DisconnectedScreen).get(1, TimeUnit.MINUTES)) {
+                JsonObject response = DevScreens.screen();
+                response.addProperty("ok", false);
+                return response;
+            }
+            Thread.sleep(100);
+        }
+        return DevTools.failure("Didn't get into the world within 2 minutes; check /status.");
+    }
+
+    /** Writes the world to disk now. {@code save-all} is only a command on dedicated servers. */
+    static JsonObject save() throws Exception {
+        MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
+        if(server == null) return DevTools.failure("Not in a single-player world.");
+        server.submit(() -> server.saveEverything(true, true, true)).get(2, TimeUnit.MINUTES);
+        return DevTools.ok();
+    }
+
+    /** Saves and leaves the current world for the title screen, as Save and Quit does. */
+    static JsonObject disconnect() throws Exception {
+        Minecraft minecraft = Minecraft.getInstance();
+        minecraft.submit(() -> leave(minecraft)).get(2, TimeUnit.MINUTES);
+        return DevTools.ok();
+    }
+
+    private static void leave(Minecraft minecraft) {
+        if(minecraft.level == null) return;
+        minecraft.level.disconnect();
+        minecraft.disconnect();
+        minecraft.setScreen(new TitleScreen());
     }
 
     private static void create(Minecraft minecraft) {

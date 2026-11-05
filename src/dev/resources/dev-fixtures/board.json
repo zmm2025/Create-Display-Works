@@ -1,0 +1,17 @@
+{
+  "parts": {
+    "board": "{x} {y} {z}",
+    "topRightTile": "{x+3} {y+1} {z}",
+    "motor": "{x-1} {y} {z+1}"
+  },
+  "clear": ["fill {x-1} {y} {z} {x+3} {y+1} {z+1} air"],
+  "steps": [
+    "tp @s {x+2} {y+1} {z-6} 0 0",
+    {"waitTicks": 10},
+    "fill {x} {y} {z} {x+3} {y+1} {z} create_display_works:flip_dot_display[facing=north]",
+    "setblock {x-1} {y} {z} create:cogwheel[axis=z]",
+    "setblock {x-1} {y} {z+1} create:creative_motor[facing=north]{ScrollValue:64}",
+    {"waitTicks": 10},
+    "flipdot_demo animate {x+3} {y+1} {z} stripes"
+  ]
+}

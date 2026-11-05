@@ -1,0 +1,6 @@
+{
+  "rendering": ["sodium", "iris", "entityculling"],
+  "claims": ["open-parties-and-claims"],
+  "addons": ["createaddition", "create-enchantment-industry", "create-connected", "create-big-cannons", "create-new-age", "copycats"],
+  "interaction": ["carry-on", "worldedit", "jade", "emi"]
+}

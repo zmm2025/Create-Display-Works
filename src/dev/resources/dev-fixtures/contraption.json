@@ -1,0 +1,21 @@
+{
+  "parts": {
+    "bearing": "{x+2} {y+4} {z}",
+    "motor": "{x+2} {y+4} {z+1}",
+    "board": "{x+1} {y+3} {z-1}"
+  },
+  "clear": [
+    "kill @e[type=create:stationary_contraption,distance=..64]",
+    "fill {x} {y} {z-1} {x+4} {y+6} {z+1} air"
+  ],
+  "steps": [
+    "tp @s {x+2} {y+4} {z-9} 0 0",
+    {"waitTicks": 10},
+    "setblock {x+2} {y+4} {z} create:mechanical_bearing[facing=north]",
+    "fill {x+1} {y+3} {z-1} {x+3} {y+5} {z-1} create_display_works:flip_dot_display[facing=north]",
+    "create glue {x+1} {y+3} {z-1} {x+3} {y+5} {z-1}",
+    {"waitTicks": 2},
+    "setblock {x+2} {y+4} {z+1} create:creative_motor[facing=north]{ScrollValue:8}",
+    {"waitUntil": "execute if entity @e[type=create:stationary_contraption,distance=..16]", "timeoutTicks": 200}
+  ]
+}

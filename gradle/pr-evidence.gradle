@@ -19,6 +19,8 @@ abstract class PrEvidenceTask extends DefaultTask {
     @Input abstract Property<String> getCheckout()
     @Input abstract Property<String> getFolder()
     @Input abstract Property<Boolean> getFetch()
+    /** Images already kept for chat, so PREVIEW.md can name them without copying them here first. */
+    @Input abstract Property<String> getKept()
 
     @TaskAction
     void run() {
@@ -59,15 +61,19 @@ abstract class PrEvidenceTask extends DefaultTask {
             throw new GradleException("PR EVIDENCE: ERROR - ${preview} is missing. Put the files there with a ${PREVIEW} " +
                     "that embeds them, or run with -Pfetch to start from this branch's current evidence.")
         }
+        String markdown = preview.getText('UTF-8')
+        Set<String> drops = matches(markdown, /<!--\s*drop:\s*(.+?)\s*-->/) as Set
+        Set<String> referenced = (localTargets(markdown) + drops) as Set
+        referenced.each { String path ->
+            File copy = new File(dir, path), original = new File(kept.get(), path)
+            if (!copy.exists() && original.file) java.nio.file.Files.copy(original.toPath(), copy.toPath())
+        }
         Map<String, File> files = [:]
         dir.eachFileRecurse(groovy.io.FileType.FILES) { File file ->
             files[dir.toPath().relativize(file.toPath()).toString().replace('\\', '/')] = file
         }
         files = files.sort()
 
-        String markdown = preview.getText('UTF-8')
-        Set<String> drops = matches(markdown, /<!--\s*drop:\s*(.+?)\s*-->/) as Set
-        Set<String> referenced = (localTargets(markdown) + drops) as Set
         List<String> missing = referenced.findAll { !files.containsKey(it) }.sort()
         if (missing) {
             throw new GradleException("PR EVIDENCE: ERROR - ${PREVIEW} refers to files that aren't in ${dir}: ${missing.join(', ')}")
@@ -207,4 +213,5 @@ tasks.register('prEvidence', PrEvidenceTask) {
     checkout = projectDir.absolutePath
     folder = layout.buildDirectory.dir('pr-evidence').get().asFile.absolutePath
     fetch = providers.gradleProperty('fetch').present
+    kept = project.ext.devEvidenceDir
 }

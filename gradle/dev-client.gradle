@@ -4,8 +4,10 @@
 //                            shows it and follows its log if it's already running
 //   ./gradlew devReload      compiles, then pushes code, assets and data into the running client
 //   ./gradlew devStart       for agents: starts this checkout's Minecraft hidden, in a T3 Code terminal when possible
-//   ./gradlew devStop        closes this checkout's Minecraft the way its close button does; T3 Code runs it when a
-//                            thread settles
+//   ./gradlew devStop        closes this checkout's Minecraft the way its close button does, and its dedicated server;
+//                            T3 Code runs it when a thread settles
+//   ./gradlew devRestart     devStop, then devStart
+//   ./gradlew devServerStart starts a test dedicated server for this checkout; devServerStop closes it
 //
 // The in-game side lives in src/dev/java/.../dev/tools; the class-redefinition agent lives in src/devAgent.
 
@@ -20,6 +22,7 @@ import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.nio.file.StandardOpenOption
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
@@ -51,6 +54,8 @@ String devBranch = providers.exec {
     commandLine 'git', 'rev-parse', '--abbrev-ref', 'HEAD'
     ignoreExitValue = true
 }.standardOutput.asText.get().trim()
+// Images shown in chat. Chat reads them from disk each time it displays them, so this folder outlives the worktree.
+ext.devEvidenceDir = new File(devRunDir, "evidence/${devIsWorktree ? projectDir.name : 'main'}").absolutePath
 String devLabel = devBranch ? "${devBranch} (${projectDir.name})" : projectDir.name
 
 // Extra mods for the dev client (Jade, EMI, ...) come from a Modrinth App profile, so they can be managed there.
@@ -67,12 +72,22 @@ File devModsSource = {
     File root = roots.find { it.isDirectory() } ?: roots.first()
     new File(root, "profiles/${devModsProfile}/mods")
 }()
+// Or a named set of test mods from gradle/dev-mod-sets.json, downloaded once into a cache every worktree shares.
+String devModSet = providers.gradleProperty('devModSet').getOrNull()
+boolean devModSetRefresh = providers.gradleProperty('devModSetRefresh').present
+File devModSetFile = file('gradle/dev-mod-sets.json')
+File devModCache = new File(gradle.gradleUserHomeDir, 'create-display-works/dev-mods')
 // Mods the Gradle classpath already loads. A second copy from the profile would stop the game with a duplicate-mod error.
 Set<String> devClasspathModIds = ['minecraft', 'neoforge', mod_id, 'create', 'ponder', 'flywheel'] as Set
 
 sourceSets {
     // Tiny -javaagent that hands the game an Instrumentation instance for redefining classes.
     create('devAgent')
+}
+
+dependencies {
+    // The game's module path provides ASM at runtime, so the agent jar doesn't need its own copy.
+    devAgentCompileOnly 'org.ow2.asm:asm:9.7.1'
 }
 
 def devAgentJar = tasks.register('devAgentJar', Jar) {
@@ -131,7 +146,115 @@ tasks.matching { it.name == 'runDevClient' }.configureEach {
         DevClientLauncher.showIfRunning(devInstanceDir, devHidden, it.logger)
         if (devIsWorktree) DevInstances.prepare(devRunDir, devInstanceDir, checkout, devWorldName, devControlPort, it.logger)
         DevInstances.setLoadingWindow(devInstanceDir, !devHidden)
-        DevMods.sync(devModsSource, new File(devInstanceDir, 'mods'), devClasspathModIds, it.logger)
+        List<File> jars = devModSet ? DevModSets.jars(devModSet, devModSetFile, devModCache, devModSetRefresh, it.logger) : DevMods.jars(devModsSource, it.logger)
+        DevMods.sync(jars, new File(devInstanceDir, 'mods'), devClasspathModIds, it.logger)
+    }
+}
+
+// -PdevServer turns the plain server run into the test server devServerStart manages.
+File devServerDir = layout.buildDirectory.dir('server-run').get().asFile
+boolean devServerRun = providers.gradleProperty('devServer').present
+neoForge.runs.server {
+    if (devServerRun) {
+        systemProperty 'createdisplayworks.dev.serverControl', 'true'
+        systemProperty 'createdisplayworks.dev.worktree', devPath(projectDir)
+    }
+}
+tasks.matching { it.name == 'runServer' }.configureEach {
+    if (devServerRun) {
+        doFirst {
+            List<File> jars = devModSet ? DevModSets.jars(devModSet, devModSetFile, devModCache, devModSetRefresh, it.logger) : []
+            DevMods.sync(jars, new File(devServerDir, 'mods'), devClasspathModIds, it.logger)
+        }
+    }
+}
+
+/** Resolves named sets of Modrinth projects, with their required dependencies, and keeps their jars in a shared cache. */
+class DevModSets {
+    static final String API = 'https://api.modrinth.com/v2'
+    static final String LOADERS = '["neoforge"]', GAME_VERSIONS = '["1.21.1"]'
+
+    /**
+     * The jars of the comma-separated {@code names}. A set's resolved versions are saved beside the jars, so later
+     * launches in any worktree need no network. {@code refresh} looks for newer versions.
+     */
+    static List<File> jars(String names, File definitions, File cache, boolean refresh, Logger logger) {
+        Map sets = new JsonSlurper().parse(definitions) as Map
+        Map<String, File> jars = [:]
+        names.split(',')*.trim().findAll().each { String name ->
+            if (!sets.containsKey(name)) throw new GradleException("Unknown mod set '${name}'; ${definitions.name} has ${sets.keySet().join(', ')}.")
+            File resolved = new File(cache, "sets/${name}.json")
+            if (refresh || !resolved.exists()) {
+                logger.lifecycle("Dev mods: resolving set '${name}' on Modrinth")
+                resolved.parentFile.mkdirs()
+                resolved.text = JsonOutput.prettyPrint(JsonOutput.toJson(resolve(sets[name] as List<String>)))
+            }
+            (new JsonSlurper().parse(resolved) as List<Map>).each { Map mod -> jars[mod.file as String] = download(mod, cache, logger) }
+        }
+        logger.lifecycle("Dev mods: ${jars.size()} from set ${names}")
+        return jars.values() as List
+    }
+
+    /** Each entry is a Modrinth slug, or slug@version to pin one. */
+    private static List<Map> resolve(List<String> projects) {
+        Map<String, Map> chosen = [:]
+        projects.each { String entry ->
+            def (String project, String pin) = entry.tokenize('@') + [null]
+            add(project, pin, null, chosen)
+        }
+        return chosen.values().collect { Map version ->
+            Map file = (version.files as List<Map>).find { it.primary } ?: (version.files as List<Map>).first()
+            [project: version.project_id, version: version.version_number, file: file.filename, url: file.url, sha1: (file.hashes as Map).sha1]
+        }
+    }
+
+    private static void add(String project, String pin, String versionId, Map<String, Map> chosen) {
+        Map version = versionId ? get("/version/${versionId}") as Map : pick(project, pin)
+        if (chosen.containsKey(version.project_id)) return
+        chosen[version.project_id as String] = version
+        (version.dependencies as List<Map>).findAll { it.dependency_type == 'required' }.each { Map dependency ->
+            add(dependency.project_id as String, null, dependency.version_id as String, chosen)
+        }
+    }
+
+    private static Map pick(String project, String pin) {
+        String query = "loaders=${URLEncoder.encode(LOADERS, 'UTF-8')}&game_versions=${URLEncoder.encode(GAME_VERSIONS, 'UTF-8')}"
+        List<Map> versions = get("/project/${project}/version?${query}") as List<Map>
+        Map version = pin ? versions.find { it.version_number == pin } : versions.find { it.version_type == 'release' } ?: versions[0]
+        if (version == null) throw new GradleException("Modrinth has no NeoForge 1.21.1 version of ${project}${pin ? " matching ${pin}" : ''}.")
+        return version
+    }
+
+    private static Object get(String path) {
+        HttpResponse<String> response = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build().send(request("${API}${path}"), HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() != 200) throw new GradleException("Modrinth answered ${response.statusCode()} for ${path}")
+        return new JsonSlurper().parseText(response.body())
+    }
+
+    private static HttpRequest request(String url) {
+        return HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(5)).header('User-Agent', 'Create-Display-Works-dev-tools').build()
+    }
+
+    private static File download(Map mod, File cache, Logger logger) {
+        File jar = new File(cache, "jars/${mod.file}")
+        if (jar.exists() && sha1(jar) == mod.sha1) return jar
+        logger.lifecycle("Dev mods: downloading ${mod.file}")
+        jar.parentFile.mkdirs()
+        File partial = File.createTempFile(jar.name, '.part', jar.parentFile)
+        try {
+            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build().send(request(mod.url as String), HttpResponse.BodyHandlers.ofFile(partial.toPath()))
+            if (sha1(partial) != mod.sha1) throw new GradleException("${mod.file} doesn't match Modrinth's checksum.")
+            Files.move(partial.toPath(), jar.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } finally {
+            partial.delete()
+        }
+        return jar
+    }
+
+    private static String sha1(File file) {
+        MessageDigest digest = MessageDigest.getInstance('SHA-1')
+        file.eachByte(65536) { byte[] bytes, int length -> digest.update(bytes, 0, length) }
+        return digest.digest().encodeHex().toString()
     }
 }
 
@@ -139,22 +262,27 @@ class DevMods {
     /** Lists the jars this sync copied last time, so jars added to run/mods by hand are left alone. */
     static final String MANIFEST = '.dev-mods-synced'
 
-    /** Mirrors the enabled jars of the Modrinth profile into the dev client's mods folder. */
-    static void sync(File source, File modsDir, Set<String> classpathModIds, Logger logger) {
+    /** The enabled jars of a Modrinth profile or any folder of mods. */
+    static List<File> jars(File source, Logger logger) {
+        if (!source.isDirectory()) {
+            logger.lifecycle("Dev mods: no mods folder at ${source}; create the Modrinth profile or set devModsProfile")
+            return []
+        }
+        // Modrinth disables a mod by renaming it to .jar.disabled, so only .jar files count.
+        return source.listFiles().findAll { it.isFile() && it.name.endsWith('.jar') }
+    }
+
+    /** Mirrors the jars into a game's mods folder. */
+    static void sync(List<File> jars, File modsDir, Set<String> classpathModIds, Logger logger) {
         modsDir.mkdirs()
         File manifest = new File(modsDir, MANIFEST)
         Set<String> previous = manifest.exists() ? manifest.readLines().findAll { it } as Set : [] as Set
         Map<String, File> wanted = [:]
-        if (source.isDirectory()) {
-            // Modrinth disables a mod by renaming it to .jar.disabled, so only .jar files count.
-            source.listFiles().findAll { it.isFile() && it.name.endsWith('.jar') }.sort { it.name }.each { File jar ->
-                Set<String> ids = modIds(jar)
-                Set<String> clash = ids.intersect(classpathModIds)
-                if (clash) logger.lifecycle("Dev mods: skipping ${jar.name}; Gradle already provides ${clash.join(', ')}")
-                else wanted[jar.name] = jar
-            }
-        } else {
-            logger.lifecycle("Dev mods: no mods folder at ${source}; create the Modrinth profile or set devModsProfile")
+        jars.sort { it.name }.each { File jar ->
+            Set<String> ids = modIds(jar)
+            Set<String> clash = ids.intersect(classpathModIds)
+            if (clash) logger.lifecycle("Dev mods: skipping ${jar.name}; Gradle already provides ${clash.join(', ')}")
+            else wanted[jar.name] = jar
         }
         (previous - wanted.keySet()).each { new File(modsDir, it).delete() }
         wanted.each { String name, File jar ->
@@ -165,7 +293,7 @@ class DevMods {
             }
         }
         manifest.text = wanted.keySet().join('\n')
-        if (wanted) logger.lifecycle("Dev mods: ${wanted.size()} from ${source}")
+        if (wanted) logger.lifecycle("Dev mods: ${wanted.size()} in ${modsDir}")
     }
 
     private static Set<String> modIds(File jar) {
@@ -250,7 +378,7 @@ class DevInstances {
         if (running(runDir)) {
             // Write the main game's unsaved changes to disk first, so the copy has them.
             try {
-                post(info(runDir)?.port ?: mainPort, '/command', 'save-all flush')
+                post(info(runDir)?.port ?: mainPort, '/save', '')
             } catch (Exception e) {
                 logger.lifecycle("Dev client: couldn't save the main game first (${e.message}); copying the world as it is on disk")
             }
@@ -353,13 +481,19 @@ class DevT3Terminal {
                 : command + ' && exit'
     }
 
+    /** Quotes arguments for the terminal's shell. PowerShell would split one with a comma, such as two mod sets. */
+    static String quoted(List<String> args, boolean windows) {
+        return args.collect { String arg -> arg ==~ /[\w.:\/=-]+/ ? arg
+                : "'" + (windows ? arg.replace("'", "''") : arg.replace("'", "'\"'\"'")) + "'" }.join(' ')
+    }
+
     static boolean run(String cli, File t3Home, String threadId, String terminalId, File cwd, String command, Logger logger) {
         Map session = null
         try {
             Map runtime = new JsonSlurper().parse(new File(t3Home, 'userdata/server-runtime.json')) as Map
             session = new JsonSlurper().parseText(exec([cli, 'auth', 'session', 'issue', '--scope', 'terminal:operate',
                                                         '--ttl', '5m', '--label', 'Minecraft dev client', '--json'])) as Map
-            Map<String, CompletableFuture<Map>> replies = ['0': new CompletableFuture<Map>(), '1': new CompletableFuture<Map>()]
+            Map<String, CompletableFuture<Map>> replies = ['0': new CompletableFuture<Map>(), '1': new CompletableFuture<Map>(), '2': new CompletableFuture<Map>()]
             StringBuilder partial = new StringBuilder()
             WebSocket.Listener listener = new WebSocket.Listener() {
                 @Override
@@ -378,8 +512,14 @@ class DevT3Terminal {
             WebSocket socket = HttpClient.newHttpClient().newWebSocketBuilder().header('Authorization', "Bearer ${session.token}")
                     .buildAsync(uri, listener).get(10, TimeUnit.SECONDS)
             try {
-                request(socket, replies, '0', 'terminal.open', [threadId: threadId, terminalId: terminalId, cwd: cwd.absolutePath, cols: 120, rows: 30])
-                request(socket, replies, '1', 'terminal.write', [threadId: threadId, terminalId: terminalId, data: command + '\r'])
+                // Text typed into a terminal whose shell is about to exit, as right after devStop, would be lost.
+                try {
+                    request(socket, replies, '0', 'terminal.close', [threadId: threadId, terminalId: terminalId])
+                } catch (IOException ignored) {
+                    // There wasn't one.
+                }
+                request(socket, replies, '1', 'terminal.open', [threadId: threadId, terminalId: terminalId, cwd: cwd.absolutePath, cols: 120, rows: 30])
+                request(socket, replies, '2', 'terminal.write', [threadId: threadId, terminalId: terminalId, data: command + '\r'])
             } finally {
                 socket.sendClose(WebSocket.NORMAL_CLOSURE, '')
             }
@@ -423,6 +563,9 @@ abstract class DevStartTask extends DefaultTask {
     @Input @Optional abstract Property<String> getT3Cli()
     @Input abstract Property<String> getT3Home()
     @Input @Optional abstract Property<String> getModsProfile()
+    @Input @Optional abstract Property<String> getModSet()
+    @Input abstract Property<Boolean> getModSetRefresh()
+    private static final long STABLE_MILLIS = 5000
 
     DevStartTask() {
         outputs.upToDateWhen { false }
@@ -432,16 +575,18 @@ abstract class DevStartTask extends DefaultTask {
     void start() {
         File gameDir = new File(gameDirectory.get())
         File checkoutDir = new File(checkout.get())
-        if (!DevInstances.running(gameDir)) {
+        long startedAt = System.currentTimeMillis()
+        boolean starting = !DevInstances.running(gameDir)
+        if (starting) {
             new File(gameDir, 'dev-instance.json').delete()
             boolean windows = System.getProperty('os.name').toLowerCase().contains('windows')
             // The game's own Gradle run reads devModsProfile, so pass on one given to devStart.
             List<String> args = ['runDevClient', '-PdevHidden']
             if (modsProfile.present) args << "-PdevModsProfile=${modsProfile.get()}".toString()
-            String quoted = args.collect { String arg -> arg ==~ /[\w.:\/=-]+/ ? arg
-                    : "'" + (windows ? arg.replace("'", "''") : arg.replace("'", "'\"'\"'")) + "'" }.join(' ')
+            if (modSet.present) args << "-PdevModSet=${modSet.get()}".toString()
+            if (modSetRefresh.get()) args << '-PdevModSetRefresh'
             boolean inTerminal = threadId.present && t3Cli.present && DevT3Terminal.run(t3Cli.get(), new File(t3Home.get()), threadId.get(),
-                    'minecraft', checkoutDir, DevT3Terminal.closingOnSuccess("./gradlew ${quoted}".toString()), logger)
+                    'minecraft', checkoutDir, DevT3Terminal.closingOnSuccess("./gradlew ${DevT3Terminal.quoted(args, windows)}".toString()), logger)
             if (inTerminal) {
                 logger.lifecycle("Starting Minecraft hidden in this thread's 'minecraft' terminal in T3 Code.")
             } else {
@@ -456,23 +601,151 @@ abstract class DevStartTask extends DefaultTask {
         }
         // Wait until the game has joined its world, so the agent can drive it right away.
         long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5)
+        // A mod can crash the game moments after it joins, so a new game has to stay up briefly to count as ready.
+        long readySince = 0
         while (System.nanoTime() < deadline) {
+            File crash = new File(gameDir, 'crash-reports').listFiles()?.find { it.lastModified() >= startedAt }
+            if (starting && crash != null) throw new GradleException("Minecraft crashed while starting; see ${crash}")
             def port = DevInstances.running(gameDir) ? DevInstances.info(gameDir)?.port : null
-            if (port != null) {
-                try {
-                    Map status = new JsonSlurper().parseText(HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status"))
-                            .timeout(Duration.ofSeconds(5)).build(), HttpResponse.BodyHandlers.ofString()).body()) as Map
-                    if (status.world != null && status.player != null) {
-                        logger.lifecycle("DEV CLIENT READY - control API on http://127.0.0.1:${port} (world '${status.world}', ${status.hidden ? 'hidden' : 'visible'})")
-                        return
-                    }
-                } catch (Exception ignored) {
-                    // Still loading.
+            Map status = port != null ? status(port) : null
+            if (status?.world != null && status.player != null) {
+                if (!starting || readySince != 0 && System.currentTimeMillis() - readySince >= STABLE_MILLIS) {
+                    logger.lifecycle("DEV CLIENT READY - control API on http://127.0.0.1:${port} (world '${status.world}', ${status.hidden ? 'hidden' : 'visible'})")
+                    return
                 }
+                if (readySince == 0) readySince = System.currentTimeMillis()
+            } else if (readySince != 0) {
+                throw new GradleException('Minecraft reached its world, then stopped answering; check its terminal or logs/latest.log.')
             }
             Thread.sleep(1000)
         }
         throw new GradleException('Minecraft did not finish loading within 5 minutes; check its terminal or log.')
+    }
+
+    private static Map status(Object port) {
+        try {
+            return new JsonSlurper().parseText(HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:${port}/status"))
+                    .timeout(Duration.ofSeconds(5)).build(), HttpResponse.BodyHandlers.ofString()).body()) as Map
+        } catch (Exception ignored) {
+            return null // Still loading.
+        }
+    }
+}
+
+/** Starts this checkout's test dedicated server and waits until it accepts players. */
+abstract class DevServerStartTask extends DefaultTask {
+    private static final String FLAT_WORLD = '{"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:dirt","height":62},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains"}'
+
+    @Input abstract Property<String> getServerDirectory()
+    @Input abstract Property<String> getCheckout()
+    @Input @Optional abstract Property<String> getThreadId()
+    @Input @Optional abstract Property<String> getT3Cli()
+    @Input abstract Property<String> getT3Home()
+    @Input @Optional abstract Property<String> getModSet()
+    @Input abstract Property<Boolean> getModSetRefresh()
+
+    DevServerStartTask() {
+        outputs.upToDateWhen { false }
+    }
+
+    @TaskAction
+    void start() {
+        File serverDir = new File(serverDirectory.get()), checkoutDir = new File(checkout.get())
+        File info = new File(checkoutDir, 'build/dev-server.json')
+        Map running = DevServers.status(info)
+        if (running != null) {
+            logger.lifecycle("DEV SERVER READY - already running: join with POST /connect?host=localhost:${running.gamePort}, console API on port ${running.port}")
+            return
+        }
+        info.delete()
+        serverDir.mkdirs()
+        int gamePort = DevServers.freePort()
+        // A disposable test world; the EULA is the same one anyone running this server accepts.
+        new File(serverDir, 'eula.txt').text = 'eula=true\n'
+        new File(serverDir, 'server.properties').text = ["server-port=${gamePort}", 'online-mode=false', 'enforce-secure-profile=false', 'spawn-protection=0',
+                                                         'level-type=minecraft:flat', 'generator-settings=' + FLAT_WORLD, 'generate-structures=false', 'view-distance=6', 'simulation-distance=6', 'gamemode=creative'].join('\n') + '\n'
+        boolean windows = System.getProperty('os.name').toLowerCase().contains('windows')
+        List<String> args = ['runServer', '-PdevServer']
+        if (modSet.present) args << "-PdevModSet=${modSet.get()}".toString()
+        if (modSetRefresh.get()) args << '-PdevModSetRefresh'
+        boolean inTerminal = threadId.present && t3Cli.present && DevT3Terminal.run(t3Cli.get(), new File(t3Home.get()), threadId.get(), 'minecraft-server',
+                checkoutDir, DevT3Terminal.closingOnSuccess("./gradlew ${DevT3Terminal.quoted(args, windows)}".toString()), logger)
+        if (inTerminal) {
+            logger.lifecycle("Starting the dedicated server in this thread's 'minecraft-server' terminal in T3 Code.")
+        } else {
+            File log = new File(serverDir, 'dev-server-start.log')
+            new ProcessBuilder([new File(checkoutDir, windows ? 'gradlew.bat' : 'gradlew').absolutePath] + args)
+                    .directory(checkoutDir).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.to(log)).start()
+            logger.lifecycle("Starting the dedicated server in the background; its output goes to ${log}.")
+        }
+        long startedAt = System.currentTimeMillis()
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            File crash = new File(serverDir, 'crash-reports').listFiles()?.find { it.lastModified() >= startedAt }
+            if (crash != null) throw new GradleException("The dedicated server crashed while starting; see ${crash}")
+            Map status = DevServers.status(info)
+            if (status != null) {
+                logger.lifecycle("DEV SERVER READY - join with POST /connect?host=localhost:${status.gamePort}, console API on port ${status.port}")
+                return
+            }
+            Thread.sleep(1000)
+        }
+        throw new GradleException('The dedicated server did not start within 5 minutes; check its terminal or log.')
+    }
+}
+
+class DevServers {
+    /**
+     * A free port near Minecraft's own. A port from the system's ephemeral range could go to an outgoing connection
+     * during the half minute the server takes to start.
+     */
+    static int freePort() {
+        for (int port = 25700; port < 25800; port++) {
+            try {
+                new ServerSocket(port).close()
+                return port
+            } catch (IOException ignored) {
+                // In use; try the next.
+            }
+        }
+        throw new GradleException('No free port between 25700 and 25800 for the dedicated server.')
+    }
+
+    /** What the running server reports, or null if it isn't running. */
+    static Map status(File info) {
+        if (!info.exists()) return null
+        try {
+            Map recorded = new JsonSlurper().parse(info) as Map
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:${recorded.port}/status")).timeout(Duration.ofSeconds(5)).build()
+            return new JsonSlurper().parseText(HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()).body()) as Map
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    /** Asks the server to save and close, and waits until it has. Returns whether one was running. */
+    static boolean stop(File info, Logger logger) {
+        Map status = status(info)
+        if (status == null) return false
+        DevInstances.post(status.port, '/quit', '')
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(1)
+        while (DevServers.status(info) != null && System.nanoTime() < deadline) Thread.sleep(250)
+        info.delete()
+        logger.lifecycle('DEV SERVER: STOPPED - the dedicated server saved and closed.')
+        return true
+    }
+}
+
+abstract class DevServerStopTask extends DefaultTask {
+    @Input abstract Property<String> getInfoFile()
+
+    DevServerStopTask() {
+        outputs.upToDateWhen { false }
+    }
+
+    @TaskAction
+    void stop() {
+        if (!DevServers.stop(new File(infoFile.get()), logger)) logger.lifecycle('DEV SERVER: NOT RUNNING - no dedicated server is running for this checkout.')
     }
 }
 
@@ -480,6 +753,7 @@ abstract class DevStopTask extends DefaultTask {
     @Input abstract Property<String> getGameDirectory()
     /** The main checkout's fixed port, for a game that didn't record its port; empty in a worktree. */
     @Input abstract Property<String> getDefaultPort()
+    @Input abstract Property<String> getServerInfoFile()
 
     DevStopTask() {
         outputs.upToDateWhen { false }
@@ -487,6 +761,7 @@ abstract class DevStopTask extends DefaultTask {
 
     @TaskAction
     void stop() {
+        DevServers.stop(new File(serverInfoFile.get()), logger)
         File gameDir = new File(gameDirectory.get())
         if (!DevInstances.running(gameDir)) {
             logger.lifecycle('DEV STOP: NOT RUNNING - no dev client is running for this checkout.')
@@ -602,13 +877,42 @@ tasks.register('devStart', DevStartTask) {
     checkout = projectDir.absolutePath
     threadId = providers.gradleProperty('threadId')
     modsProfile = providers.gradleProperty('devModsProfile')
+    modSet = providers.gradleProperty('devModSet')
+    modSetRefresh = providers.gradleProperty('devModSetRefresh').present
     t3Cli = providers.environmentVariable('T3CODE_CLI_PATH')
     t3Home = providers.environmentVariable('T3CODE_HOME').orElse(new File(System.getProperty('user.home'), '.t3').absolutePath)
+    mustRunAfter 'devStop'
 }
 
 tasks.register('devStop', DevStopTask) {
     group = 'dev'
-    description = "Closes this checkout's dev client the way its close button does, saving the world. T3 Code runs it when a thread settles."
+    description = "Closes this checkout's dev client the way its close button does, saving the world, and its dedicated server. T3 Code runs it when a thread settles."
     gameDirectory = devInstanceDir.absolutePath
     defaultPort = devIsWorktree ? '' : devControlPort
+    serverInfoFile = layout.buildDirectory.file('dev-server.json').get().asFile.absolutePath
+}
+
+tasks.register('devRestart') {
+    group = 'dev'
+    description = "For agents: closes this checkout's dev client and starts it hidden again, for changes that need a restart."
+    dependsOn 'devStop', 'devStart'
+}
+
+tasks.register('devServerStart', DevServerStartTask) {
+    group = 'dev'
+    description = "Starts a test dedicated server for this checkout (in a T3 Code terminal with -PthreadId=<id>), for testing as a non-operator player."
+    dependsOn 'classes', 'devClasses'
+    serverDirectory = devServerDir.absolutePath
+    checkout = projectDir.absolutePath
+    threadId = providers.gradleProperty('threadId')
+    modSet = providers.gradleProperty('devModSet')
+    modSetRefresh = providers.gradleProperty('devModSetRefresh').present
+    t3Cli = providers.environmentVariable('T3CODE_CLI_PATH')
+    t3Home = providers.environmentVariable('T3CODE_HOME').orElse(new File(System.getProperty('user.home'), '.t3').absolutePath)
+}
+
+tasks.register('devServerStop', DevServerStopTask) {
+    group = 'dev'
+    description = "Closes this checkout's test dedicated server, saving its world."
+    infoFile = layout.buildDirectory.file('dev-server.json').get().asFile.absolutePath
 }

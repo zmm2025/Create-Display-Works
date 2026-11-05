@@ -62,13 +62,22 @@ final class DevPerf {
         @Override public AABB getRenderBoundingBox(T be) { return inner.getRenderBoundingBox(be); }
     }
 
-    /** Measures for {@code seconds}; {@code namespace} picks whose block entity renderers to time (default: this mod). */
-    static JsonObject perf(double seconds, String namespace) throws Exception {
+    /**
+     * Measures for {@code seconds}; {@code namespace} picks whose block entity renderers to time (default: this mod).
+     * {@code fps} replaces a hidden game's frame rate cap while measuring: a number, or {@code unlimited}.
+     */
+    static JsonObject perf(double seconds, String namespace, String fps) throws Exception {
         if(seconds < 0.5 || seconds > 60) return DevTools.failure("Measure for 0.5-60 seconds.");
         if(session != null) return DevTools.failure("A measurement is already running.");
         Minecraft minecraft = Minecraft.getInstance();
         if(minecraft.level == null) return DevTools.failure("Not in a world.");
         String mod = namespace == null || namespace.isBlank() ? CreateDisplayWorks.MOD_ID : namespace;
+        Integer capBefore = DevInstance.fps();
+        if(fps != null) {
+            DevInstance.fps(fps.equals("unlimited") ? DevInstance.UNLIMITED_FPS : Integer.valueOf(fps));
+            // Let a client tick lift the cap, so the measurement doesn't start capped.
+            DevInput.waitClientTicks(2);
+        }
         Session measuring = new Session(System.nanoTime() + (long)(seconds * 1e9));
         minecraft.submit(() -> install(measuring, minecraft.getBlockEntityRenderDispatcher(), mod)).get(1, TimeUnit.MINUTES);
         session = measuring;
@@ -76,6 +85,7 @@ final class DevPerf {
             return measuring.result.get((long)seconds + 30, TimeUnit.SECONDS);
         } finally {
             session = null;
+            if(fps != null) DevInstance.fps(capBefore);
             minecraft.submit(() -> restore(measuring, minecraft.getBlockEntityRenderDispatcher())).get(1, TimeUnit.MINUTES);
         }
     }

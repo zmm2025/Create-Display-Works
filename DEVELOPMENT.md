@@ -14,7 +14,10 @@
 | `./gradlew devReload` | Compiles, then pushes code, assets and data into this checkout's running dev client. |
 | `./gradlew devReload -Pfull` | The same, but reloads all assets and data even if nothing changed. |
 | `./gradlew devStart -PthreadId=<id>` | For agents: starts this checkout's dev client with its window hidden, in a `minecraft` terminal in that T3 Code thread, and waits until it has joined its world. |
-| `./gradlew devStop` | Closes this checkout's dev client the way its close button does, saving the world. If it doesn't close within 2 minutes, it ends the process without saving. |
+| `./gradlew devStop` | Closes this checkout's dev client the way its close button does, saving the world, and its dedicated server. If the game doesn't close within 2 minutes, it ends the process without saving. |
+| `./gradlew devRestart -PthreadId=<id>` | For agents: `devStop`, then `devStart`, for changes that need a restart or a different set of mods. |
+| `./gradlew devServerStart -PthreadId=<id>` | Starts a test dedicated server for this checkout. See [A second player or a dedicated server](#a-second-player-or-a-dedicated-server). |
+| `./gradlew devServerStop` | Closes that server, saving its world. |
 
 In T3 Code, add these as project scripts (**Project settings → Scripts**) so they're one click away. T3 stores
 scripts in its own settings rather than reading them from the repo, so each developer adds them once. The scripts
@@ -92,6 +95,25 @@ removed from it on the next launch, and jars you put there by hand are left alon
   `~/.gradle/gradle.properties` or pass `-PdevModsProfile=...`. `devStart` passes it on to the game it starts.
 - Launching the profile itself from the Modrinth App doesn't include this mod. Use **Launch Minecraft** for that.
 
+### Named sets of test mods
+
+For compatibility tests, pass `-PdevModSet=<set>` to `devStart`, `devRestart`, `runDevClient` or `devServerStart`, in
+place of the Modrinth profile. Several sets work, separated by commas: `-PdevModSet=interaction,claims`.
+
+| Set | Mods |
+| --- | --- |
+| `rendering` | Sodium, Iris, Entity Culling |
+| `claims` | Open Parties and Claims |
+| `addons` | Create Crafts & Additions, Enchantment Industry, Connected, Big Cannons, New Age, Copycats+ |
+| `interaction` | Carry On, WorldEdit, Jade, EMI |
+
+Sets live in [gradle/dev-mod-sets.json](gradle/dev-mod-sets.json) as Modrinth project slugs, or `slug@version` to pin
+a version. Required dependencies come along. The first use downloads the jars into
+`~/.gradle/create-display-works/dev-mods`, which every worktree shares, so later uses need no network. Add
+`-PdevModSetRefresh` to look for newer versions. A later launch without `-PdevModSet` goes back to the profile.
+
+Mods that aren't on Modrinth, such as FTB Chunks, need a folder of jars and `-PdevModsProfile=<absolute path>`.
+
 ### Hidden games and switching in
 
 Each checkout runs at most one game. An agent starts its worktree's game with `devStart`, which keeps the window
@@ -162,21 +184,35 @@ returns JSON with an `ok` field. Requests run one at a time.
 | Endpoint | Body or query | Effect |
 | --- | --- | --- |
 | `GET /status` | | Worktree, world, open screen, whether the window is hidden, window size and GUI scale, player position and rotation, held item and crosshair target. |
-| `POST /window` | `?show=true` or `?show=false` | Shows the window and brings it to the front, or hides it. |
+| `POST /window` | `?show=true` or `?show=false`; `?fps=<n>`, `unlimited` or `default`; `?width=&height=` | Shows the window and brings it to the front, or hides it. `fps` replaces a hidden game's 30 FPS cap until `default` undoes it. `width` and `height` resize the window, which changes what screenshots and screens lay out. |
 | `POST /quit` | | Closes the game the way its close button does, saving the world. It answers before the game has exited; `devStop` waits for that. |
-| `POST /command` | body: a command, with or without `/`, or a JSON array of steps | Runs the command as the player at permission level 4. Returns the chat output and whether it succeeded. An array runs its steps in order and returns `results`, one per step. A step is a command, `{"waitTicks": 20}`, or `{"waitUntil": "<command>", "timeoutTicks": 200}`, which reruns the command each tick until it succeeds and stops the batch if it never does. Consecutive commands run within one server tick. `tp` and `teleport` turn creative flight on first, so the player doesn't fall. |
-| `POST /screenshot` | `?hud=false` hides the HUD; `?frames=<n>&intervalMs=<ms>` (up to 600 frames, default interval 100 ms; `0` takes consecutive frames) captures a sequence; `&video=mp4` or `&video=gif` also encodes it | Saves PNGs under `screenshots/dev-tools/` in the game's folder and returns their paths. A sequence also returns `sheet`, one image with up to 36 evenly spread frames tiled left to right and top to bottom (`sheetFrames` lists which, when some are left out), `timesMs`, when each frame was taken, and `gameTimes`, the game time in ticks (with the partial tick) each frame drew. Frames are saved in the background, so a sequence doesn't slow the game down. `video` is made with ffmpeg and plays at the speed the frames were captured; an MP4 runs at 60 FPS and a GIF at 30 FPS, at most 960 pixels wide. With `hud=false`, an open chat is closed first; any other open screen still shows and is named in `screen`. |
-| `POST /camera` | `?x=&y=&z=`; optional `&face=north` (default: the side the player is on), `&distance=3` or `&fit=<W>` / `&fit=<W>x<H>`, `&screenshot=true`, `&hud=false` | Flies the player to look straight at that point from `distance` blocks off the given face, or far enough back that `W` by `H` blocks fill the view. Block coordinates aim at the block's center; decimals aim at that exact point. Waits until the client has moved, and can take a screenshot in the same call. |
-| `GET /perf` | optional `?seconds=5` (0.5-60), `&namespace=<mod id>` (default: this mod) | Measures for that long and returns frame times (`avg`, `p50`, `p95`, `p99`, `max` in ms, and FPS), the CPU time each of the mod's block entity renderers takes per frame and how many it draws, server tick times over the last 100 ticks, and heap use. Renderer times cover building the geometry, not GPU time. |
+| `POST /command` | body: a command, with or without `/`, or a JSON array of steps | Runs the command as the player at permission level 4. Client commands, such as `flywheel backend`, run on the client. Returns the chat output and whether it succeeded. On a remote server, the command goes through chat with the player's own permissions, and failure means a red reply. An array runs its steps in order and returns `results`, one per step. A step is a command, `{"waitTicks": 20}`, `{"waitUntil": "<command>", "timeoutTicks": 200}`, which reruns the command each tick until it succeeds and stops the batch if it never does, or `{"call": "/key?key=w&ticks=20", "body": "..."}`, which runs any endpoint here and stops the batch if it fails. Consecutive commands run within one server tick. `tp` and `teleport` turn creative flight on first, so the player doesn't fall. |
+| `POST /screenshot` | `?hud=false` hides the HUD; `?frames=<n>&intervalMs=<ms>` (up to 600 frames, default interval 100 ms; `0` takes consecutive frames) captures a sequence; `&video=mp4` or `&video=gif` also encodes it; `&keep=<name>` keeps the result for chat | Saves PNGs under `screenshots/dev-tools/` in the game's folder and returns their paths. A sequence also returns `sheet`, one image with up to 36 evenly spread frames tiled left to right and top to bottom (`sheetFrames` lists which, when some are left out), `timesMs`, when each frame was taken, and `gameTimes`, the game time in ticks (with the partial tick) each frame drew. Frames are saved in the background, so a sequence doesn't slow the game down. `video` is made with ffmpeg and plays at the speed the frames were captured; an MP4 runs at 60 FPS and a GIF at 30 FPS, at most 960 pixels wide. With `hud=false`, an open chat is closed first; any other open screen still shows and is named in `screen`. `keep` copies the image, or the video and contact sheet, to the evidence folder, and returns `kept` and ready-to-paste `markdown`. See [Images in chat](#images-in-chat). |
+| `POST /camera` | `?x=&y=&z=`; optional `&face=north` (default: the side the player is on), `&distance=3` or `&fit=<W>` / `&fit=<W>x<H>`, `&screenshot=true`, `&hud=false`, `&keep=<name>` | Flies the player to look straight at that point from `distance` blocks off the given face, or far enough back that `W` by `H` blocks fill the view. Block coordinates aim at the block's center; decimals aim at that exact point. Waits until the client has moved, and can take a screenshot in the same call. |
+| `POST /look` | `?yaw=&pitch=`, `?dx=&dy=` (degrees from the current view), `?x=&y=&z=` or `?entity=<id>` | Turns the player without moving them, and returns the new crosshair target. |
+| `GET /perf` | optional `?seconds=5` (0.5-60), `&namespace=<mod id>` (default: this mod), `&fps=<n>` or `&fps=unlimited` | Replaces a hidden game's frame rate cap for the measurement, if asked. Measures for that long and returns frame times (`avg`, `p50`, `p95`, `p99`, `max` in ms, and FPS), the CPU time each of the mod's block entity renderers takes per frame and how many it draws, server tick times over the last 100 ticks, and heap use. Renderer times cover building the geometry, not GPU time. |
 | `GET /sounds` | optional `?sinceMs=3000&filter=<text in the sound id>` | Sounds holding a channel now (`playing`), with `heardGain`, the volume estimated to reach the player after the category slider and distance, and every sound started in the last `sinceMs` (`started`). Master volume is reported separately: `masterVolume` is the setting, `outputGain` what the sound engine plays at (0 while the window is hidden). |
 | `GET /find` | `?block=<id or #tag>` or `?namespace=<mod id>`; optional `&radius=16` (up to 64), `&x=&y=&z=` (default: the player), `&limit=100` | Loaded blocks that match within a cube, nearest first, with their block states. |
 | `GET /blockentity` | `?x=&y=&z=`; optional `&side=client\|server\|both`, `&fields=a,b.c`, `&all=true`, `&depth=2`, `&frames=<n>&intervalMs=<ms>` | The block entity's fields there, read by reflection on each side: this mod's own fields, or with `all=true` also those inherited from Create and vanilla (this mod's own objects are expanded `depth` levels). `fields` picks fields or dotted paths. With `frames`, the client side is sampled on that many rendered frames (up to 600; `intervalMs=0` takes every frame), each with its game time and partial tick, to follow animations. |
-| `POST /use` | optional `?x=&y=&z=&face=` | Right-clicks the crosshair target, or that block face. The player must be within reach. |
-| `POST /attack` | optional `?x=&y=&z=&face=` | Left-clicks: breaks the block in creative mode, or attacks the entity. |
-| `POST /key` | `?key=e` (GLFW names: `escape`, `enter`, `e`, `left.shift`, `f3`, ...); optional `&mods=shortcut,shift` (`shortcut` is Cmd on macOS and Ctrl elsewhere; also `ctrl`, `super`, `alt`) | Presses and releases the key through the game's keyboard handler, like a real key press: in the open screen, where mods that hook screen keys, such as EMI's and JEI's recipe keys, see it too, or with no screen open as a game keybind or a key the game handles itself, such as Escape for the pause menu. Modifiers only reach the screen's key event, so they don't work for checks that read the real keyboard, such as text boxes' own shortcuts. |
+| `GET /entities` | optional `?radius=32&type=<text in the entity id>&limit=50` | Entities near the player, nearest first, with ids for `/look` and `/use`, what they ride, and a train's UUID for carriages. |
+| `GET /screen` | | The open screen's title, its widgets with their text and whether they're active, and the items in its slots. Positions are the pixels `/click` takes, so finding a button takes no screenshot. |
+| `POST /close` | | Closes the open screen, if any. Escape with no screen open would open the pause menu, which pauses the game. |
+| `GET /chat` | optional `?lines=20` | Recent chat, and the action bar if it's showing, where Create and others report what a click did. |
+| `GET` or `POST /options` | no parameters, or `?filter=<text>`: lists settings. `?graphicsMode=2&renderDistance=8`: sets them. `?restore=true`: puts them back. | Reads and changes the settings in `options.txt`, by the names that file uses, so this covers key bindings and sound levels too. The first change keeps a copy for `restore`. Returns each change's `before` and `after`. |
+| `POST /use` | optional `?x=&y=&z=&face=` or `?entity=<id>`, `&mods=`, `&holding=<item id>` | Right-clicks the crosshair target, that block face or that entity, directly through the game mode. The player must be within reach. `holding` first waits until that item has reached the client's hand. For anything mods catch from real input, use `/click` instead. |
+| `POST /attack` | the same | Left-clicks: breaks the block in creative mode, or attacks the entity. |
+| `POST /key` | `?key=e` (GLFW names: `escape`, `enter`, `e`, `left.shift`, `f3`, ..., or an action such as `key.forward`, or `sneak`); optional `&action=down`, `&action=up` or `&ticks=<n>`; `&mods=` | Presses the key through the game's keyboard handler, like a real key press: in the open screen, where mods that hook screen keys, such as EMI's and JEI's recipe keys, see it too, or with no screen open as a game keybind or a key the game handles itself. By default it taps the key. `action=down` holds it until `action=up` or `/release`, and `ticks` holds it that long and returns after it's released. A held key also counts for code that reads the physical keyboard, such as `InputConstants.isKeyDown`, Ponder's hold key and Create's train controls. |
 | `POST /type` | body: text | Types into the open screen. |
-| `POST /click` | `?x=&y=&button=0` | Moves the cursor to screenshot pixel coordinates in the open screen and clicks there. The cursor stays there, so later screenshots show that hover state. |
-| `POST /mouse` | `?x=&y=` | Moves the cursor in the open screen without clicking, to hover a widget for its tooltip. Coordinates outside the window, such as `?x=-1&y=-1`, park it so nothing is hovered. |
+| `POST /click` | `?button=left`, `right`, `middle` or a number; `?x=&y=`, `?text=<widget label>` or `?slot=<slot index>`; `&action=`, `&ticks=`, `&mods=`, `&holding=` as above | Presses a mouse button the way a real click does, so input events reach mods. With a screen open it moves the cursor to that place first, and the cursor stays there, so later screenshots show that hover state. With no screen open it clicks in the world at the crosshair, and holding the left button mines. |
+| `POST /mouse` | `?x=&y=`, `?text=` or `?slot=`; optional `&steps=<n>` | Moves the cursor in the open screen without clicking, to hover a widget for its tooltip. With a button down it drags, in `steps` even moves. Coordinates outside the window, such as `?x=-1&y=-1`, park it so nothing is hovered. |
+| `POST /scroll` | `?delta=1`; optional `?x=&y=`, `?text=` or `?slot=`, `&mods=` | Scrolls the wheel over the open screen, or in the world, where it changes the hotbar slot unless a mod takes it. |
+| `POST /release` | | Lets go of everything held. Leaving a world does the same. `/status` lists what's held under `held`, with the key mappings that are down. |
+| `POST /drop` | body: file paths, one per line | Drops the files on the open screen, as dragging them onto the window does. Native file dialogs can't be driven, so test imports this way. |
+| `POST /fixture` | `?name=board`, `contraption` or `train`; optional `&x=&y=&z=`, `&verbose=true` | Builds a working test setup. See [Fixtures](#fixtures). |
+| `POST /player` | `?name=Alex`; optional `&op=true`, `&command=<command>`, `&x=&y=&z=&face=`, `&leave=true`; no parameters lists players | Adds a second player. See [A second player or a dedicated server](#a-second-player-or-a-dedicated-server). |
+| `POST /save` | | Writes the world to disk now. `save-all` only exists on dedicated servers. |
+| `POST /connect` | `?host=localhost:25700` or `?world=<name>` (default: the test world) | Leaves the current world and joins that server or world, returning once the player is in. |
+| `POST /disconnect` | | Saves and leaves the world for the title screen. |
 | `POST /reload` | `?worktree=&full=` | What `devReload` calls after compiling. |
 
 Use `/command` to move and aim the player, for example
@@ -193,6 +229,67 @@ curl -s -X POST "localhost:25595/screenshot?hud=false"
 
 In Windows PowerShell, use `curl.exe`, because plain `curl` is an alias for `Invoke-WebRequest`.
 
+`mods` lists modifiers to hold around the press: `sneak` (the key bound to sneaking), `shortcut` (Cmd on macOS, Ctrl
+elsewhere), `ctrl`, `shift`, `alt` and `super`. In a screen, `shift` is what shift-clicks want. In the world, sneaking
+is `sneak`: a worktree's game copies the user's key bindings, and sneak may not be on shift. The modifier is held a
+couple of ticks before the press, so the server knows about it first.
+
+A whole interaction fits in one request, which costs an agent far less than one request per step:
+
+```json
+["give @s create:wrench",
+ {"call": "/look?x=10&y=64&z=5"},
+ {"waitTicks": 3},
+ {"call": "/click?button=right&mods=sneak&holding=create:wrench"},
+ {"waitTicks": 5},
+ {"call": "/chat?lines=1"}]
+```
+
+### Fixtures
+
+`POST /fixture?name=<name>` builds a working setup in a few seconds, each in its own spot far from the world's builds.
+It returns the coordinates of its `parts`, the commands to `clear` it, and any `failed` steps. Recipes are batch steps
+in [src/dev/resources/dev-fixtures](src/dev/resources/dev-fixtures), so they're also worked examples, and adding one
+means adding a file and its name in `DevFixtures`.
+
+| Name | What you get |
+| --- | --- |
+| `board` | A powered 4 by 2 flip-dot board facing north, playing scrolling stripes. |
+| `contraption` | A 3 by 3 flip-dot board glued to a running mechanical bearing. |
+| `train` | Stations Alpha and Beta 50 blocks apart, and an assembled train at Alpha, facing Beta, with a seat, controls and a Blaze Burner conductor. |
+
+A train outlives `clear`: run `create train remove <uuid>` first, with the UUID from `/entities?type=carriage`.
+
+### A second player or a dedicated server
+
+`/player?name=Alex` adds a real second player to the integrated or dedicated server, with no client. It appears in the
+world and the player list, and has no operator permissions unless you pass `op=true`. `command` runs a command as it
+and `x`, `y`, `z`, `face` right-click a block with its main hand, so it can stand in for a stranger in a land claim:
+
+```sh
+# Dev claims the chunk; Alex can't use what's in it, but can outside it.
+curl -s -X POST localhost:<port>/command --data "oclaims claim"
+curl -s -X POST "localhost:<port>/player?name=Alex"
+curl -s -X POST localhost:<port>/command --data "tp Alex 100 1 99"
+curl -s -X POST "localhost:<port>/player?name=Alex&x=100&y=0&z=100&face=up"   # "use": "PASS" means nothing happened
+curl -s -X POST "localhost:<port>/player?name=Alex&leave=true"
+```
+
+`./gradlew devServerStart -PthreadId=<id>` starts a dedicated server for this checkout, in a `minecraft-server` terminal,
+with a superflat world in `build/server-run`, offline mode and the same mods as the dev client. Starting it accepts the
+Minecraft EULA for that test server. Add `-PdevModSet=<set>` if the client uses a set, so both have the same mods. It
+prints the address to join with `/connect`, and a console API, whose port is in `build/dev-server.json`:
+
+| Endpoint | Effect |
+| --- | --- |
+| `GET /status` | The ports and the players online. |
+| `POST /command` | Runs a command with full permissions, as the server console does. `op Dev` makes the client an operator. |
+| `POST /player` | The same as the client's `/player`. |
+| `POST /quit` | Saves and closes the server. `devServerStop` and `devStop` do this. |
+
+The client joins as a non-operator, so `/command` shows what a normal player may do. `/camera` and `/fixture` need
+single-player. The server quits after 30 idle minutes with nobody on it, or when its worktree is removed.
+
 ### Testing tips
 
 - Check sounds with `/sounds` instead of recording audio. A sound that should be audible but is missing from
@@ -205,6 +302,19 @@ In Windows PowerShell, use `curl.exe`, because plain `curl` is an alias for `Inv
 - Use `/perf` before and after a rendering change, with the same view and display size, to compare frame times.
 - Use `/find` to locate a fixture's parts (motors, displays, gauges) instead of scanning coordinates one command at a
   time.
+- Read `/screen`, `/chat` and `/entities` before reaching for a screenshot. A failed Create assembly only shows its
+  reason on the screen, though, so look at one then.
+- Teleport first, then build: `fill` and `setblock` fail in chunks that aren't loaded, and `/fixture` handles this. Use
+  `{"waitUntil": "execute if loaded X Y Z"}`, and a newly loaded chunk may take a moment to start ticking.
+- Change settings with `/options`, for example `?graphicsMode=2` for Fabulous, and `?restore=true` when you're done.
+  Anything read only at startup, or a Flywheel or Create config file, needs `devRestart`. `flywheel backend <name>`
+  works through `/command`, and persists, so set it back too.
+- Create's kinetic blocks only reach a neighbor a moment after placing. A powered bearing assembles itself when
+  rotation reaches it, so place the board and glue first and the motor last. A click on a running bearing stops it.
+- Open Parties and Claims' commands are `/oclaims`, `/oparties` and `/opac`. For FTB Chunks, which needs
+  `-PdevModsProfile`, use `ftbteams server create Name` and `ftbchunks admin claim_as Name#<first 8 characters of the team id>`.
+- Carry On needs empty hands and at most 2.5 blocks of distance. `mods=sneak` on `/click` picks up a block.
+- To force an autosave-only path, such as saved-data cleanup, `tick sprint 6300` runs a save interval quickly.
 - To check what the server does with media packets a modified client could send, type
   `/flipdot_packet control <pos> <action>` or `/flipdot_packet upload <pos> <columns> <rows>` in chat. These dev-only
   client commands send the packets without the media screen and log the server's replies with a `RAW_MEDIA` prefix in
@@ -215,15 +325,76 @@ In Windows PowerShell, use `curl.exe`, because plain `curl` is an alias for `Inv
   speed, replace it in one batch:
   `["setblock X Y Z air", "setblock X Y Z create:creative_motor[facing=F]{ScrollValue:256}"]`.
 
+### Schematics
+
+A Schematic and Quill works through real input, in one batch if you like. With the quill in hand, `/look` at each
+corner and `/click?button=right`. The action bar reports each step in `/chat`. `/scroll?delta=3&mods=ctrl` resizes the
+selection, and a third right-click opens the name prompt: click the box, `/type` a name, then `/click?text=Save`. A
+corner on a block's top or bottom selects the block beyond it.
+
+Upload at a Schematic Table: `/use` it, shift-click the empty schematic into it with `/click?slot=<n>&mods=shift`, and
+click the upload button. With the schematic in hand, `/click?button=right` twice deploys it. In a Schematicannon's
+screen, shift-click in the schematic and gunpowder and click the play button at about (360, 178). Keep a chest of
+blocks next to the cannon. `/blockentity?x=&y=&z=&side=server&all=true&fields=state,statusMsg,blocksPlaced` follows it;
+`statusMsg` `schematicExpired` means the selection was empty.
+
+### Trains
+
+`POST /fixture?name=train` does the first part of this. These steps all work through the API, and show what to change
+when testing something the fixture doesn't cover.
+
+1. **Track:** `fill` a straight line of `create:track[shape=xo]`, or `[shape=zo]` along Z, on solid ground.
+2. **Station:** hold `create:track_station`, `/use` the track with `face=up` while facing the way the train will
+   leave, then `/use` the ground beside it. `/use` the station to open its screen.
+3. **Name it:** `/click?text=Track Station`, `/key?key=a&mods=shortcut`, `/type` the name, then `/close`.
+4. **Assembly mode:** `/click?text=Create new Train`. `/blockentity` on the station shows `assemblyDirection`, the side
+   the train is built on. That's the opposite of its forward direction.
+5. **Bogey:** `/close`, then `/use` the track right next to the station marker, on the `assemblyDirection` side, holding
+   `create:railway_casing`. The frontmost bogey has to be there. Bogeys at other track pieces add carriages or length.
+6. **Body:** build on the bogey, and use `create glue <from> <to>` with a box that includes the bogey, or assembly
+   fails with "No structure attached". Train Controls must face `assemblyDirection`. A Blaze Burner
+   (`create:blaze_burner[blaze=smouldering]`) on the side the controls face is a conductor; a seat there only is if
+   someone sits on it.
+7. **Assemble:** `/use` the station and `/click?text=Assemble Train`. If it stays on the same screen, take a screenshot
+   for the reason. `/entities?type=carriage` lists the carriage and its train's UUID.
+8. **Drive:** right-click the seat and then the controls on the moving train: `/look` at each and `/click?button=right`,
+   not `/use`, since contraptions catch real clicks. Then hold `/key?key=key.forward&action=down` and let go with
+   `action=up`. The train accelerates like a player's would. A player who isn't on a seat stays behind and loses
+   control at a distance. `/key?key=sneak&ticks=4` gets off the seat.
+9. **Schedule:** drop a Schedule on the station with the train at it, and it runs if the train has a conductor:
+
+   ```text
+   summon item X Y+1 Z {Item:{id:"create:schedule",count:1,components:{"create:train_schedule":{Entries:[{Instruction:{Id:"create:destination",Data:{Text:"Beta"}},Conditions:[[{Id:"create:delay",Data:{Value:1,TimeUnit:1}}]]}],Cyclic:false}}}}
+   ```
+
+   Wait for it with `{"waitUntil": "execute if entity @e[type=create:carriage_contraption,x=X,y=Y,z=Z,dx=6,dy=4,dz=2]",
+   "timeoutTicks": 600}`.
+10. **Disassemble:** the train must have arrived by navigation; a manual stop leaves the station "Idle". `/use` the
+    station and `/click?text=Disassemble Train`. The carriage goes back to blocks and the station returns to assembly
+    mode. `create train remove <uuid>` deletes a train anywhere.
+
+### Screenshots of hidden games
+
 Screenshots capture the frames the game renders. That works while the window is hidden or in the background, but
 Minecraft stops rendering while its window is minimized, so `/screenshot` times out then. Commands and input still
 work. A worktree's game hides instead of minimizing for this reason.
+
+## Images in chat
+
+T3 Code stores an embedded image as its file path and reads the file each time it displays the message: once the file
+is gone, the image's address answers 404 and no new one can be issued. So images shown in chat live in
+`run/evidence/<worktree>/` in the main checkout (`run/evidence/main/` for its own game), which isn't deleted with the
+worktree or its game folder. `keep=<name>` on `/screenshot` or `/camera` puts them there, and never replaces an earlier
+image, since chat may already show it. `/status` reports the folder as `evidenceDirectory`. Git ignores `run/`, so it
+stays out of every branch. Delete folders in it by hand once their threads no longer matter; their images then stop
+displaying in those chats.
 
 ## PR evidence
 
 `./gradlew prEvidence` uploads `build/pr-evidence/` as the branch's PR evidence: screenshots, recordings and other
 files that a workflow embeds in the PR's Preview section. [CONTRIBUTING.md](CONTRIBUTING.md#pr-evidence) explains it.
-The control API's `/screenshot` makes the images, GIFs and MP4s.
+The control API's `/screenshot` makes the images, GIFs and MP4s. A file `PREVIEW.md` names that's missing from
+`build/pr-evidence/` is copied from this worktree's kept images, so the images shown in chat don't need capturing twice.
 
 ## Release testing with standard Java
 
