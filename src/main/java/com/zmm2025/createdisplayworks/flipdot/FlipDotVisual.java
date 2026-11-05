@@ -71,24 +71,24 @@ public class FlipDotVisual extends KineticBlockEntityVisual<FlipDotBlockEntity> 
         var origin = getVisualPosition();
         board.translation(origin.getX(), origin.getY(), origin.getZ()).translate(.5f, .5f, .5f)
             .rotateY((float)Math.toRadians(180 - facing.toYRot())).translate(-.5f, -.5f, -.5f);
-        createDiscs();
+        createDiscs(partial);
         updateLight(partial);
     }
-    private void createDiscs() {
+    private void createDiscs(float partial) {
         palette = (long)blockEntity.discColor() << 24 | blockEntity.backColor();
         var instancer = instancerProvider().instancer(InstanceTypes.TRANSFORMED, DISCS.get(palette));
-        // Hidden until beginFrame places them. A board created out of view would otherwise draw all its discs at the
-        // render origin, near the camera, until it's first seen.
-        for (int i = 0; i < 64; i++) discs[i] = instancer.createInstance().setZeroTransform();
+        // Placed now because beginFrame skips boards out of view, and boards on contraptions never count as in view.
+        // Until they're placed, discs would draw at the render origin, near the camera.
+        for (int i = 0; i < 64; i++) discs[i] = place(instancer.createInstance(), i, shown[i] = blockEntity.angle(i, partial));
+        for (var disc : discs) disc.setChanged();
         shownSettled = false;
-        java.util.Arrays.fill(shown, Float.NaN);
     }
     @Override public void update(float partial) {
         cog.setup(blockEntity).setChanged();
         if (palette == ((long)blockEntity.discColor() << 24 | blockEntity.backColor())) return;
         for (var disc : discs) disc.delete();
         deleteGhosts();
-        createDiscs();
+        createDiscs(partial);
         updateLight(partial);
     }
     @Override public void beginFrame(DynamicVisual.Context context) {
