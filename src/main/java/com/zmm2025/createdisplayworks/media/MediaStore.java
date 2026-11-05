@@ -37,9 +37,9 @@ import java.util.stream.Stream;
  * <p>
  * Boards claim the clip they show and release it when they're removed or their media is cleared. Contraptions that
  * carry boards claim their clips too, so they're kept while the contraption is unloaded. When the world saves, clips
- * that nothing claims and that no train or online player holds are deleted once {@link MediaRetention} says they've
- * waited long enough. Waiting for the save keeps a crash from leaving saved boards pointing at a deleted file. If a
- * release is missed, the file is kept rather than lost.
+ * that nothing claims and that no train or online player holds count as unused, and {@link MediaRetention} deletes
+ * them only once they outgrow their share of the disk. Waiting for the save keeps a crash from leaving saved boards
+ * pointing at a deleted file. If a release is missed, the file is kept rather than lost.
  */
 public final class MediaStore {
     private static final Pattern ID=Pattern.compile("[0-9a-f]{32}");
@@ -112,17 +112,19 @@ public final class MediaStore {
         updateContraptionClaims(server,claims);
         Path folder=server.getWorldPath(LevelResource.ROOT).resolve(FOLDER);
         if(Files.isDirectory(folder))try(Stream<Path> files=Files.list(folder)) {
-            Map<String,Path> stored=new HashMap<>();
+            Map<String,Path> stored=new HashMap<>();Map<String,Long> sizes=new HashMap<>();
             for(Path file:files.toList()) {
                 String name=file.getFileName().toString();
-                if(name.endsWith(SUFFIX))stored.put(name.substring(0,name.length()-SUFFIX.length()),file);
+                if(!name.endsWith(SUFFIX))continue;
+                String id=name.substring(0,name.length()-SUFFIX.length());
+                stored.put(id,file);sizes.put(id,Files.size(file));
             }
             Set<String> referenced=new HashSet<>(claims.boards.keySet());
             referenced.addAll(claims.untracked);
             claims.contraptions.values().forEach(carried->referenced.addAll(carried.media()));
             collectHeldMedia(server,referenced);
             var waiting=new HashMap<>(claims.unreferencedSince);
-            for(String id:MediaRetention.expired(stored.keySet(),referenced,claims.unreferencedSince,server.overworld().getGameTime()))
+            for(String id:MediaRetention.excess(sizes,referenced,claims.unreferencedSince,server.overworld().getGameTime(),MediaLimits.UNUSED_MIB.get()*1024L*1024))
                 Files.deleteIfExists(stored.get(id));
             if(!waiting.equals(claims.unreferencedSince))claims.setDirty();
         }catch(IOException e){LogUtils.getLogger().error("Unable to clean up flip-dot media in {}",folder,e);}
