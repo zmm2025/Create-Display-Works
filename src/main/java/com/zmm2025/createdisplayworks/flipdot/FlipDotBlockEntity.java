@@ -116,6 +116,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         FlipDotBlockEntity oldController=null;
         for(int i=0;i<previous.length;i++)if(previous[i]==BoardCells.ORIGIN)oldController=tiles.get(i);
         if(oldController==null)return;
+        if(BoardCells.reshaped(previous,cells,oldController.memberCells)){keepLines(tiles,cells,previous);return;}
         int[] source=BoardCells.rearrangement(previous,cells,oldController.memberCells);
         if(source==null)return;
         record Content(long pending,String rowText,boolean hasText,boolean bitmapMode){}
@@ -126,6 +127,16 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         var controller=found.controller();
         if(oldController!=controller){controller.memberCells=oldController.memberCells.clone();oldController.moveMediaTo(controller);}
+    }
+    /** A quarter turn changes the board's shape, so its picture can't follow, but its lines of text keep their order. */
+    private static void keepLines(List<FlipDotBlockEntity> tiles,int[] cells,int[] previous) {
+        Map<Integer,String> lines=new HashMap<>();
+        for(int i=0;i<tiles.size();i++)if(tiles.get(i).hasText)lines.putIfAbsent(BoardCells.row(previous[i]),tiles.get(i).rowText);
+        if(lines.isEmpty())return;
+        for(int i=0;i<tiles.size();i++) {
+            var tile=tiles.get(i);String line=lines.get(BoardCells.row(cells[i]));
+            tile.hasText=line!=null;tile.rowText=line==null?"":line;tile.setChanged();
+        }
     }
     private void moveMediaTo(FlipDotBlockEntity target) {
         if(media==null)return;

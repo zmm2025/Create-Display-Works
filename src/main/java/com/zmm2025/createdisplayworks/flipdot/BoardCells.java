@@ -22,6 +22,13 @@ public final class BoardCells {
     public static boolean valid(int cell) {
         return cell != NONE && Math.abs(column(cell)) < FlipDotAssembly.MAX_SPAN && Math.abs(row(cell)) < FlipDotAssembly.MAX_SPAN;
     }
+    /** Whether the same tiles of one earlier board now form a different shape, as after a quarter turn. */
+    public static boolean reshaped(int[] previous, int[] current, int[] previousShape) {
+        if (previous.length != current.length || previous.length != previousShape.length) return false;
+        int[] before = previous.clone(), after = current.clone(), shape = previousShape.clone();
+        Arrays.sort(before); Arrays.sort(after); Arrays.sort(shape);
+        return Arrays.equals(before, shape) && !Arrays.equals(before, after);
+    }
     /**
      * Finds how a board's tiles were rearranged when the whole board was turned, flipped or mirrored. {@code previous}
      * holds each tile's cell before and {@code current} its cell now, in the same order. {@code previousShape} is the
