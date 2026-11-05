@@ -12,6 +12,8 @@ public final class MediaImportException extends IOException {
         TOOLS_DOWNLOAD,
         /** A downloaded helper couldn't start, for example because security software blocked it. */
         TOOLS_BLOCKED,
+        /** The player turned media tools off in the client config. */
+        TOOLS_OFF,
         /** No helpers exist for this OS and CPU; {@link #detail()} names the platform. */
         UNSUPPORTED,
         /** The helper and scratch folder can't be written; {@link #detail()} is its path. */

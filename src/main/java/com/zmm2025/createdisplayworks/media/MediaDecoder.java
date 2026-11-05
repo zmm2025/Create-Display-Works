@@ -1,5 +1,6 @@
 package com.zmm2025.createdisplayworks.media;
 
+import com.zmm2025.createdisplayworks.ClientConfig;
 import java.io.*;
 import java.net.URI;
 import java.net.http.*;
@@ -74,10 +75,14 @@ public final class MediaDecoder {
         String cpu=arch.equals("aarch64")||arch.equals("arm64")?"arm64":arch.equals("amd64")||arch.equals("x86_64")?"x86_64":arch;
         return (os.contains("win")?"windows":os.contains("mac")?"macosx":"linux")+"-"+cpu;
     }
+    private static Path decoderFolder(Path cache){return cache.resolve("ffmpeg-"+VERSION+"-"+platform());}
+    /** Whether the first import still has to download the decoder. */
+    public static boolean decoderMissing(Path cache){return !Files.isRegularFile(decoderFolder(cache).resolve(MediaTools.MANIFEST));}
     static Path decoder(Path cache,Consumer<String> status) throws Exception {
+        if(ClientConfig.SPEC.isLoaded()&&!ClientConfig.MEDIA_TOOLS.get())throw new MediaImportException(MediaImportException.Reason.TOOLS_OFF,"Media tools are turned off in the client config.");
         String platform=platform();boolean windows=platform.startsWith("windows");
         if(!HASHES.containsKey(platform))throw new MediaImportException(MediaImportException.Reason.UNSUPPORTED,"No bundled decoder is available for "+platform,platform,null);
-        Path root=cache.resolve("ffmpeg-"+VERSION+"-"+platform),exe=root.resolve(windows?"ffmpeg.exe":"ffmpeg");
+        Path root=decoderFolder(cache),exe=root.resolve(windows?"ffmpeg.exe":"ffmpeg");
         Path ready=MediaTools.ready(root,exe.getFileName().toString());
         if(ready!=null)return ready;
         status.accept("decoder");
@@ -121,7 +126,6 @@ public final class MediaDecoder {
                 if(Files.size(file)>MAX_BYTES)throw new MediaImportException(MediaImportException.Reason.TOO_LARGE,"Choose a media file smaller than 100 MB.");
                 Files.copy(file,input);
             }
-            Path executable=decoder(cache,status);status.accept("converting");
             int w=columns*8,h=rows*8;
             byte[] header;try(var in=Files.newInputStream(input)){header=in.readNBytes(65536);}
             String brand=new String(header,java.nio.charset.StandardCharsets.ISO_8859_1);
@@ -130,6 +134,7 @@ public final class MediaDecoder {
                 header=Files.readAllBytes(input);brand=new String(header,java.nio.charset.StandardCharsets.ISO_8859_1);
             }
             if(brand.startsWith("RIFF") && brand.contains("ANIM"))return WebpAnimation.decode(input,columns,rows,seconds,threshold,invert,scale,dither,filename(source));
+            Path executable=decoder(cache,status);status.accept("converting");
             boolean still=header.length>2 && ((header[0]==(byte)0x89 && !brand.contains("acTL")) || header[0]==(byte)0xFF || brand.contains("heic") || brand.contains("heix") || brand.contains("mif1") || brand.contains("avif") || brand.startsWith("BM") || (header[0]==0 && header[1]==0 && header[2]==1) || (brand.startsWith("RIFF") && !brand.contains("ANIM")));
             // Probe the first decoded frame, including rotation, using the same bounded decoder.
             Path first=temp.resolve("first.png");

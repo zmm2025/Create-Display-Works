@@ -1,5 +1,6 @@
 package com.zmm2025.createdisplayworks.media;
 
+import com.zmm2025.createdisplayworks.ClientConfig;
 import com.simibubi.create.foundation.gui.AllGuiTextures;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
@@ -95,6 +96,11 @@ public final class MediaScreen extends AbstractSimiScreen {
         control("status");
         if(savedFrames>0&&!requestedEditor&&original==null){requestedEditor=true;control("edit");}
     }
+    /** Says up front when importing will download programs, or can't because the player turned that off. */
+    private Component toolsNote(){
+        if(!ClientConfig.MEDIA_TOOLS.get())return text("empty.tools_off");
+        return MediaDecoder.decoderMissing(minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"))?text("empty.tools_download"):null;
+    }
     private int footerY(){return video()?196:172;}
     private boolean video(){return original!=null?original.count()>1:fresh?preview!=null&&preview.count()>1:savedFrames>1;}
     private MediaSettings settings(){return new MediaSettings(cutoff,invert,dither,scale,seconds);}
@@ -161,6 +167,7 @@ public final class MediaScreen extends AbstractSimiScreen {
             errorHint=switch(known.reason()){
                 case NETWORK,TOOLS_DOWNLOAD->text("empty.check_connection");
                 case TOOLS_BLOCKED,UNSUPPORTED,CACHE->text("empty.see_status");
+                case TOOLS_OFF->text("empty.tools_off_short");
                 default->errorHint;
             };
             // The player sees a short hint; the log keeps the cause for bug reports.
@@ -172,6 +179,7 @@ public final class MediaScreen extends AbstractSimiScreen {
                 case NETWORK->text("error.network",known.detail());
                 case TOOLS_DOWNLOAD->text("error.tools_download",known.detail());
                 case TOOLS_BLOCKED->text("error.tools_blocked");
+                case TOOLS_OFF->text("error.tools_off");
                 case UNSUPPORTED->text("error.unsupported",known.detail());
                 case CACHE->text("error.cache",known.detail());
             };
@@ -307,7 +315,9 @@ public final class MediaScreen extends AbstractSimiScreen {
             for(int i=0;i<Math.min(3,lines.size());i++)g.drawCenteredString(font,lines.get(i),px+64,py+54+i*10,0xD3C6BA);
             return;
         }
-        if(preview==null){AllIcons.I_SCHEMATIC.render(g,px+56,py+27);g.drawCenteredString(font,text(errorDetail==null?"empty.title":"status.load_failed"),px+64,py+51,0xD3C6BA);g.drawCenteredString(font,errorDetail==null?text("empty.subtitle"):errorHint,px+64,py+63,0x999999);return;}
+        if(preview==null){AllIcons.I_SCHEMATIC.render(g,px+56,py+27);g.drawCenteredString(font,text(errorDetail==null?"empty.title":"status.load_failed"),px+64,py+51,0xD3C6BA);g.drawCenteredString(font,errorDetail==null?text("empty.subtitle"):errorHint,px+64,py+63,0x999999);
+            if(errorDetail==null&&toolsNote()!=null){var lines=font.split(toolsNote(),pw-8);for(int i=0;i<Math.min(2,lines.size());i++)g.drawCenteredString(font,lines.get(i),px+64,py+74+i*9,0x999999);}
+            return;}
         int w=columns*8,h=rows*8;float pixel=Math.min(pw/(float)w,ph/(float)h);int dw=Math.round(w*pixel),dh=Math.round(h*pixel);px+=(pw-dw)/2;py+=(ph-dh)/2;
         g.fill(px,py,px+dw,py+dh,0xFF000000|back);
         int count=original==null?preview.count():original.frameCount(settings());
