@@ -65,6 +65,8 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
         super.onPlace(state, level, pos, oldState, moving);
         BlockState connected = connect(state, level, pos);
         if (connected != state) level.setBlock(pos, connected, Block.UPDATE_ALL);
+        // Schematicannons place tiles without updating neighbors, so tell the tiles around this one that it landed.
+        else state.updateNeighbourShapes(level, pos, Block.UPDATE_ALL);
     }
     @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(HORIZONTAL_FACING).getAxis(); }
     // Matches Create's Display Board.
