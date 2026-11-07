@@ -4,6 +4,13 @@ The user tests changes in a live Minecraft dev client started with `./gradlew ru
 script in T3 Code). Each worktree runs its own game, with its own copy of the test world, so this worktree's game is
 yours to use. [DEVELOPMENT.md](DEVELOPMENT.md) explains the setup.
 
+## No release yet
+
+The mod hasn't been released, so no player has a world with its blocks in it. Until the first release, don't write code
+that upgrades older saves or keeps old data formats, block states, registry names or network payloads working. Change
+them freely, even if the user's test worlds lose data. [PUBLISHING.md](PUBLISHING.md) says to remove this section
+before the first release.
+
 ## When you finish a turn
 
 If the turn changed anything under `src/`, run `./gradlew devReload` from this worktree once, as the last step

@@ -2,6 +2,11 @@
 
 Things to do when the mod first goes on a listing site, and to recheck for each release.
 
+## Before the first release
+
+- Remove the **No release yet** section from [AGENTS.md](AGENTS.md). From the first release on, players' worlds hold
+  this mod's saved data, so a change to it needs code that upgrades older saves.
+
 ## Disclose the media tools
 
 Media import downloads and runs other programs, and YouTube imports also check a version list on GitHub, so every

@@ -14,7 +14,6 @@ import net.minecraft.nbt.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
@@ -84,15 +83,6 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
 
     private Direction right() {
         return FlipDotAssembly.right(getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING));
-    }
-
-    @Override
-    public void initialize() {
-        super.initialize();
-        // Displays saved before connected borders load with every border showing.
-        if (level == null || level.isClientSide) return;
-        BlockState connected = FlipDotBlock.connect(getBlockState(), level, worldPosition);
-        if (connected != getBlockState()) level.setBlock(worldPosition, connected, Block.UPDATE_ALL);
     }
 
     @Override
@@ -579,11 +569,11 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
         displayed = tag.getLong("Dots");
-        pending = tag.contains("PendingDots") ? tag.getLong("PendingDots") : displayed;
+        pending = tag.getLong("PendingDots");
         flipStarted = tag.getLong("FlipStarted");
         duration = Math.max(1, tag.getInt("FlipDuration"));
-        dye = tag.contains("Dye") ? DyeColor.byId(tag.getInt("Dye")) : DyeColor.WHITE;
-        backDye = tag.contains("BackDye") ? DyeColor.byId(tag.getInt("BackDye")) : DyeColor.BLACK;
+        dye = DyeColor.byId(tag.getInt("Dye"));
+        backDye = DyeColor.byId(tag.getInt("BackDye"));
         if (backDye == dye) backDye = dye == DyeColor.BLACK ? DyeColor.WHITE : DyeColor.BLACK;
         soundController = tag.getBoolean("SoundController");
         paletteSet = tag.getBoolean("PaletteSet");
@@ -599,16 +589,6 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
                 ? tag.getInt("BoardCell")
                 : BoardCells.NONE;
         memberCells = tag.getIntArray("MemberCells");
-        // Older saves link tiles by absolute position. Those are still right where the board was saved.
-        if (!tag.contains("BoardCell") && tag.contains("KnownController")) {
-            BlockPos controller = BlockPos.of(tag.getLong("KnownController"));
-            Direction right = right();
-            boardCell = FlipDotAssembly.cell(worldPosition, controller, right);
-            memberCells = Arrays.stream(tag.getLongArray("KnownMembers"))
-                    .mapToInt(m -> FlipDotAssembly.cell(BlockPos.of(m), controller, right))
-                    .sorted()
-                    .toArray();
-        }
         if (memberCells.length > FlipDotAssembly.MAX_TILES
                 || Arrays.stream(memberCells).anyMatch(c -> !BoardCells.valid(c))) memberCells = new int[0];
         restoreClock = !clientPacket;
@@ -622,8 +602,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
             media = null;
             mediaId = null;
             mediaArchive = null;
-            // Older saves, and boards whose clip couldn't be stored, keep the clip inline. It moves to the store on
-            // load.
+            // A board whose clip couldn't be stored keeps it inline, and moves it to the store once it can.
             if (tag.contains("MediaId")) {
                 mediaId = tag.getString("MediaId");
                 var clip = MediaStore.load(mediaId);

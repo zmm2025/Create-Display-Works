@@ -149,7 +149,6 @@ public final class MediaStore {
                     sizes.put(id, Files.size(file));
                 }
                 Set<String> referenced = new HashSet<>(claims.boards.keySet());
-                referenced.addAll(claims.untracked);
                 claims.contraptions.values().forEach(carried -> referenced.addAll(carried.media()));
                 collectHeldMedia(server, referenced);
                 var waiting = new HashMap<>(claims.unreferencedSince);
@@ -258,32 +257,14 @@ public final class MediaStore {
         final Map<UUID, Carried> contraptions = new HashMap<>();
         /** When each clip nothing referenced was first noticed, in overworld game time. See {@link MediaRetention}. */
         final Map<String, Long> unreferencedSince = new HashMap<>();
-        /**
-         * Files stored before this world tracked claims. Their boards claim them as their chunks load, so they're only
-         * cleaned up from the next session on.
-         */
-        final Set<String> untracked = new HashSet<>();
 
         static Claims of(MinecraftServer server) {
             return server.overworld()
                     .getDataStorage()
                     .computeIfAbsent(
-                            new SavedData.Factory<>(() -> fresh(server), Claims::read, null),
-                            "create_display_works_media");
+                            new SavedData.Factory<>(Claims::new, Claims::read, null), "create_display_works_media");
         }
 
-        private static Claims fresh(MinecraftServer server) {
-            var claims = new Claims();
-            try (Stream<Path> files =
-                    Files.list(server.getWorldPath(LevelResource.ROOT).resolve(FOLDER))) {
-                files.map(f -> f.getFileName().toString())
-                        .filter(n -> n.endsWith(SUFFIX))
-                        .forEach(n -> claims.untracked.add(n.substring(0, n.length() - SUFFIX.length())));
-            } catch (IOException ignored) {
-            }
-            claims.setDirty();
-            return claims;
-        }
         /** Records which clips a contraption carries now, and where. */
         void carry(ServerLevel level, AbstractContraptionEntity contraption) {
             var media = mediaOn(contraption);
