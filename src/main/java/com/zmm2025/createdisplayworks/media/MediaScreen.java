@@ -1,6 +1,5 @@
 package com.zmm2025.createdisplayworks.media;
 
-import com.zmm2025.createdisplayworks.ClientConfig;
 import com.simibubi.create.foundation.gui.AllGuiTextures;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
@@ -97,14 +96,22 @@ public final class MediaScreen extends AbstractSimiScreen {
         if(savedFrames>0&&!requestedEditor&&original==null){requestedEditor=true;control("edit");}
     }
     private Path cache(){return minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache");}
-    /** Asks before the first import downloads programs. Stays this screen's session, so the server keeps it open behind the popup. */
-    private void askToDownload(int megabytes){
+    /** Runs on the import thread when an import is about to download programs: asks the player and waits for the answer. */
+    private boolean approveDownload(int megabytes) throws InterruptedException {
+        if(downloadApproved)return true;
+        var answer=new CompletableFuture<Boolean>();
+        minecraft.execute(()->{if(minecraft.screen==this)askToDownload(megabytes,answer);else answer.complete(false);});
+        try{return answer.get();}catch(ExecutionException e){return false;}
+    }
+    /** The popup stays part of this screen's session, so the server keeps the display open behind it. */
+    private void askToDownload(int megabytes,CompletableFuture<Boolean> answer){
         asking=true;
         minecraft.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(yes->{
-            minecraft.setScreen(this);asking=false;downloadApproved=yes;
-            if(yes)importPreview();
+            downloadApproved=yes;answer.complete(yes);asking=false;minecraft.setScreen(this);
         },text("tools_prompt.title"),text("tools_prompt.message",megabytes),text("tools_prompt.download"),net.minecraft.network.chat.CommonComponents.GUI_CANCEL){
             @Override public boolean isPauseScreen(){return false;}
+            // Leaving the world, or anything else that replaces the popup, counts as Cancel, so the import doesn't wait forever.
+            @Override public void removed(){answer.complete(false);}
         });
     }
     private int footerY(){return video()?196:172;}
@@ -155,13 +162,12 @@ public final class MediaScreen extends AbstractSimiScreen {
     public void importPreview(){
         if(busy||sourceValue.isBlank())return;
         String input=sourceValue.strip();
-        if(!downloadApproved&&ClientConfig.MEDIA_TOOLS.get()){int size=MediaDecoder.downloadSize(input,cache());if(size>0){askToDownload(size);return;}}
         busy=true;status=text("status.loading");errorDetail=null;progress=null;syncControls();
         int duration=60,threshold=cutoff;boolean inverted=invert,ordered=dither;var sizingMode=scale;
         job=WORKER.submit(()->{
             try{
                 var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,cache(),
-                    step->minecraft.execute(()->{if(minecraft.screen==this&&busy)progress=text("progress."+step);}));
+                    step->minecraft.execute(()->{if(minecraft.screen==this&&busy)progress=text("progress."+step);}),this::approveDownload);
                 byte[] pixels=clip.editable()==null?null:clip.editable().pixels();
                 minecraft.execute(()->{if(minecraft.screen!=this)return;preview=clip;original=clip.editable();originalPixels=pixels;fresh=true;dirty=false;busy=false;playing=true;previewTicks=0;status=text("status.ready");init();setFocused(null);syncControls();});
             }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception);syncControls();});}
@@ -169,6 +175,8 @@ public final class MediaScreen extends AbstractSimiScreen {
     }
     private void showError(Exception error){
         String message=error.getMessage()==null?"":error.getMessage().toLowerCase(Locale.ROOT);
+        // Choosing Cancel in the download popup isn't a failure.
+        if(error instanceof MediaImportException declined&&declined.reason()==MediaImportException.Reason.DECLINED){status=text("status.load");errorDetail=null;return;}
         status=text("status.load_failed");errorHint=text("empty.check_source");
         if(error instanceof MediaImportException known){
             // Only some failures are the source's fault; the rest point at the connection or the details below.
@@ -188,6 +196,7 @@ public final class MediaScreen extends AbstractSimiScreen {
                 case TOOLS_DOWNLOAD->text("error.tools_download",known.detail());
                 case TOOLS_BLOCKED->text("error.tools_blocked");
                 case TOOLS_OFF->text("error.tools_off");
+                case DECLINED->null;
                 case UNSUPPORTED->text("error.unsupported",known.detail());
                 case CACHE->text("error.cache",known.detail());
             };

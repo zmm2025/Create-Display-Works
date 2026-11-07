@@ -14,6 +14,8 @@ public final class MediaImportException extends IOException {
         TOOLS_BLOCKED,
         /** The player turned media tools off in the client config. */
         TOOLS_OFF,
+        /** The player chose not to download the media tools this import needs. */
+        DECLINED,
         /** No helpers exist for this OS and CPU; {@link #detail()} names the platform. */
         UNSUPPORTED,
         /** The helper and scratch folder can't be written; {@link #detail()} is its path. */

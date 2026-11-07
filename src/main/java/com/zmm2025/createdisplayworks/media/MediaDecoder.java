@@ -77,8 +77,16 @@ public final class MediaDecoder {
         return (os.contains("win")?"windows":os.contains("mac")?"macosx":"linux")+"-"+cpu;
     }
     private static Path decoderFolder(Path cache){return cache.resolve("ffmpeg-"+VERSION+"-"+platform());}
+    /** Asks the player before an import downloads programs, and returns whether they agreed. */
+    @FunctionalInterface public interface DownloadConsent { boolean approve(int megabytes) throws InterruptedException; }
+    /** Stops when the player turned Media Tools off, and asks before downloading the programs this import needs. */
+    private static void askForTools(String source,Path cache,DownloadConsent consent) throws Exception {
+        if(ClientConfig.SPEC.isLoaded()&&!ClientConfig.MEDIA_TOOLS.get())throw new MediaImportException(MediaImportException.Reason.TOOLS_OFF,"Media tools are turned off in the client config.");
+        int size=downloadSize(source,cache);
+        if(size>0&&!consent.approve(size))throw new MediaImportException(MediaImportException.Reason.DECLINED,"The player chose not to download media tools.");
+    }
     /** About how many megabytes of programs importing {@code source} still has to download, or 0 if it has them all. */
-    public static int downloadSize(String source,Path cache){
+    static int downloadSize(String source,Path cache){
         int size=Files.isRegularFile(decoderFolder(cache).resolve(MediaTools.MANIFEST))?0:DECODER_MB;
         return YouTubeImport.matches(source)&&YouTubeImport.toolsMissing(cache)?size+YouTubeImport.TOOLS_MB:size;
     }
@@ -112,6 +120,9 @@ public final class MediaDecoder {
     }
     public enum Scale { STRETCH, FIT, FILL }
     public static MediaClip decode(String source,int columns,int rows,int seconds,int threshold,boolean invert,Scale scale,boolean dither,Path cache,Consumer<String> status) throws Exception {
+        return decode(source,columns,rows,seconds,threshold,invert,scale,dither,cache,status,megabytes->true);
+    }
+    public static MediaClip decode(String source,int columns,int rows,int seconds,int threshold,boolean invert,Scale scale,boolean dither,Path cache,Consumer<String> status,DownloadConsent consent) throws Exception {
         cache=cache.toAbsolutePath().normalize();
         if(columns<1||rows<1||columns>32||rows>32||columns*rows>MediaClip.MAX_TILES)throw new IllegalArgumentException("Media canvases support at most 256 blocks.");
         if(seconds<1 || seconds>60 || threshold<0 || threshold>255)throw new IllegalArgumentException("Invalid import settings");
@@ -122,7 +133,7 @@ public final class MediaDecoder {
         try {
             Path input=temp.resolve("input"),raw=temp.resolve("frames.raw"),errors=temp.resolve("decode.txt");
             status.accept("loading");
-            if(YouTubeImport.matches(source)) YouTubeImport.download(source,seconds,cache,temp,input,decoder(cache,status),status);
+            if(YouTubeImport.matches(source)){askForTools(source,cache,consent);YouTubeImport.download(source,seconds,cache,temp,input,decoder(cache,status),status);}
             else if(source.startsWith("https://") || source.startsWith("http://"))download(URI.create(source),input);
             else {
                 Path file=Path.of(source);
@@ -138,6 +149,8 @@ public final class MediaDecoder {
                 header=Files.readAllBytes(input);brand=new String(header,java.nio.charset.StandardCharsets.ISO_8859_1);
             }
             if(brand.startsWith("RIFF") && brand.contains("ANIM"))return WebpAnimation.decode(input,columns,rows,seconds,threshold,invert,scale,dither,filename(source));
+            // Animated WebP is read without programs, so only now is it known whether this import needs them.
+            askForTools(source,cache,consent);
             Path executable=decoder(cache,status);status.accept("converting");
             boolean still=header.length>2 && ((header[0]==(byte)0x89 && !brand.contains("acTL")) || header[0]==(byte)0xFF || brand.contains("heic") || brand.contains("heix") || brand.contains("mif1") || brand.contains("avif") || brand.startsWith("BM") || (header[0]==0 && header[1]==0 && header[2]==1) || (brand.startsWith("RIFF") && !brand.contains("ANIM")));
             // Probe the first decoded frame, including rotation, using the same bounded decoder.
