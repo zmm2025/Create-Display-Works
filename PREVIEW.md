@@ -24,11 +24,11 @@ Empty bar slots used to differ only by color, which a board can't show. They now
 
 ### Quarter turns
 
-A 3×2 board turned 90° on a bearing keeps its lines of text in order.
+A board turned 90° on a bearing now clears, like Create's display boards.
 
-| Before | After |
-| --- | --- |
-| ![Before: TOP repeated on every row](roll90-text-before.png) | ![After: TOP, then LOW, then an empty row](roll90-text-after.png) |
+| Our board, before the turn | Our board, after | Create's board, after |
+| --- | --- | --- |
+| ![TOP and LOW on a 3×2 board](ours-3x2-90-start.png) | ![The same tiles, now 2×3 and blank](ours-3x2-90-end.png) | ![Create's board, also blank](create-3x2-90-end.png) |
 
 ### Trains
 
@@ -42,14 +42,24 @@ Boards on contraptions could lose their discs until the fix.
 
 ### Claims
 
-Placing a tile next to a claimed board used to join it. It's now refused.
+Claim mods can't tell the client that a board is protected, so the placement ghost still shows, and the click is refused.
 
-| Before | After |
-| --- | --- |
-| ![Before: the board grew to three tiles wide](claim-before.png) | ![After: "This board is protected"](claim-after.png) |
+| Aiming at a claimed board | Clicking the board | Clicking the ground beside it |
+| --- | --- | --- |
+| ![Ghost tile and arrow](claim-hover.png) | ![The claim mod refuses the click](claim-refused.png) | !["This board is protected"](claim-ground-refused.png) |
 
-### Media Tools setting
+### Media Tools
 
-| First import | Setting off |
-| --- | --- |
-| ![The import screen says the first import downloads ffmpeg](import-first-use.png) | ![The import screen says Media Tools are off](import-off-error.png) |
+The first import that needs tools now asks first, instead of a note on the empty screen. Turning Media Tools off still gives an error when importing.
+
+| Before | After | Setting off |
+| --- | --- | --- |
+| ![The note on the empty screen](import-first-use.png) | ![The Download media tools popup](popup.png) | ![Media Tools are off](import-off-error.png) |
+
+### Schematicannon
+
+Printed boards match Create's: same blocks and cost, blank content. The tile borders now match the source board.
+
+| Source | Printed | Written to after printing |
+| --- | --- | --- |
+| ![Our boards and Create's with text and a clip](sch-source.png) | ![Both printed blank](sch-result.png) | ![Printed boards showing new text](sch-printed-used.png) |
