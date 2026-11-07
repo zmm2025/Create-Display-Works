@@ -97,18 +97,19 @@ public final class MediaScreen extends AbstractSimiScreen {
     }
     private Path cache(){return minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache");}
     /** Runs on the import thread when an import is about to download programs: asks the player and waits for the answer. */
-    private boolean approveDownload(int megabytes) throws InterruptedException {
+    private boolean approveDownload(int megabytes,boolean update) throws InterruptedException {
         if(downloadApproved)return true;
         var answer=new CompletableFuture<Boolean>();
-        minecraft.execute(()->{if(minecraft.screen==this)askToDownload(megabytes,answer);else answer.complete(false);});
+        minecraft.execute(()->{if(minecraft.screen==this)askToDownload(megabytes,update,answer);else answer.complete(false);});
         try{return answer.get();}catch(ExecutionException e){return false;}
     }
     /** The popup stays part of this screen's session, so the server keeps the display open behind it. */
-    private void askToDownload(int megabytes,CompletableFuture<Boolean> answer){
+    private void askToDownload(int megabytes,boolean update,CompletableFuture<Boolean> answer){
+        String prompt=update?"tools_prompt.update_":"tools_prompt.";
         asking=true;
         minecraft.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(yes->{
             downloadApproved=yes;answer.complete(yes);asking=false;minecraft.setScreen(this);
-        },text("tools_prompt.title"),text("tools_prompt.message",megabytes),text("tools_prompt.download"),net.minecraft.network.chat.CommonComponents.GUI_CANCEL){
+        },text(prompt+"title"),text(prompt+"message",megabytes),text(update?"tools_prompt.update":"tools_prompt.download"),net.minecraft.network.chat.CommonComponents.GUI_CANCEL){
             @Override public boolean isPauseScreen(){return false;}
             // Leaving the world, or anything else that replaces the popup, counts as Cancel, so the import doesn't wait forever.
             @Override public void removed(){answer.complete(false);}

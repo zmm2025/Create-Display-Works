@@ -77,18 +77,27 @@ public final class MediaDecoder {
         return (os.contains("win")?"windows":os.contains("mac")?"macosx":"linux")+"-"+cpu;
     }
     private static Path decoderFolder(Path cache){return cache.resolve("ffmpeg-"+VERSION+"-"+platform());}
-    /** Asks the player before an import downloads programs, and returns whether they agreed. */
-    @FunctionalInterface public interface DownloadConsent { boolean approve(int megabytes) throws InterruptedException; }
-    /** Stops when the player turned Media Tools off, and asks before downloading the programs this import needs. */
-    private static void askForTools(String source,Path cache,DownloadConsent consent) throws Exception {
+    /**
+     * Asks the player before an import downloads programs, and returns whether they agreed. {@code update} is true when
+     * every download replaces an older copy the player already has.
+     */
+    @FunctionalInterface public interface DownloadConsent { boolean approve(int megabytes,boolean update) throws InterruptedException; }
+    /**
+     * Stops when the player turned Media Tools off, and asks before downloading the programs this import needs. For a
+     * YouTube link it returns the yt-dlp and Deno releases the player agreed to, otherwise null.
+     */
+    private static YouTubeImport.Plan askForTools(String source,Path cache,DownloadConsent consent,Consumer<String> status) throws Exception {
         if(ClientConfig.SPEC.isLoaded()&&!ClientConfig.MEDIA_TOOLS.get())throw new MediaImportException(MediaImportException.Reason.TOOLS_OFF,"Media tools are turned off in the client config.");
-        int size=downloadSize(source,cache);
-        if(size>0&&!consent.approve(size))throw new MediaImportException(MediaImportException.Reason.DECLINED,"The player chose not to download media tools.");
-    }
-    /** About how many megabytes of programs importing {@code source} still has to download, or 0 if it has them all. */
-    static int downloadSize(String source,Path cache){
-        int size=Files.isRegularFile(decoderFolder(cache).resolve(MediaTools.MANIFEST))?0:DECODER_MB;
-        return YouTubeImport.matches(source)&&YouTubeImport.toolsMissing(cache)?size+YouTubeImport.TOOLS_MB:size;
+        boolean decoder=!Files.isRegularFile(decoderFolder(cache).resolve(MediaTools.MANIFEST));
+        int size=decoder?DECODER_MB:0;
+        YouTubeImport.Plan tools=null;
+        // Before the player first agrees to YouTube tools, the size comes from the built-in list without contacting GitHub.
+        boolean usedBefore=source!=null&&YouTubeImport.matches(source)&&YouTubeImport.usedBefore(cache);
+        if(source!=null&&YouTubeImport.matches(source)){tools=YouTubeImport.plan(cache,usedBefore,status);size+=tools.megabytes();}
+        if(size>0&&!consent.approve(size,!decoder&&tools!=null&&tools.update()))throw new MediaImportException(MediaImportException.Reason.DECLINED,"The player chose not to download media tools.");
+        // Agreeing to install the tools covers the newest release, which only GitHub's list knows.
+        if(tools!=null&&!usedBefore)tools=YouTubeImport.plan(cache,true,status);
+        return tools;
     }
     static Path decoder(Path cache,Consumer<String> status) throws Exception {
         if(ClientConfig.SPEC.isLoaded()&&!ClientConfig.MEDIA_TOOLS.get())throw new MediaImportException(MediaImportException.Reason.TOOLS_OFF,"Media tools are turned off in the client config.");
@@ -120,7 +129,7 @@ public final class MediaDecoder {
     }
     public enum Scale { STRETCH, FIT, FILL }
     public static MediaClip decode(String source,int columns,int rows,int seconds,int threshold,boolean invert,Scale scale,boolean dither,Path cache,Consumer<String> status) throws Exception {
-        return decode(source,columns,rows,seconds,threshold,invert,scale,dither,cache,status,megabytes->true);
+        return decode(source,columns,rows,seconds,threshold,invert,scale,dither,cache,status,(megabytes,update)->true);
     }
     public static MediaClip decode(String source,int columns,int rows,int seconds,int threshold,boolean invert,Scale scale,boolean dither,Path cache,Consumer<String> status,DownloadConsent consent) throws Exception {
         cache=cache.toAbsolutePath().normalize();
@@ -133,7 +142,7 @@ public final class MediaDecoder {
         try {
             Path input=temp.resolve("input"),raw=temp.resolve("frames.raw"),errors=temp.resolve("decode.txt");
             status.accept("loading");
-            if(YouTubeImport.matches(source)){askForTools(source,cache,consent);YouTubeImport.download(source,seconds,cache,temp,input,decoder(cache,status),status);}
+            if(YouTubeImport.matches(source)){var tools=askForTools(source,cache,consent,status);YouTubeImport.download(source,seconds,cache,temp,input,decoder(cache,status),tools,status);}
             else if(source.startsWith("https://") || source.startsWith("http://"))download(URI.create(source),input);
             else {
                 Path file=Path.of(source);
@@ -150,7 +159,7 @@ public final class MediaDecoder {
             }
             if(brand.startsWith("RIFF") && brand.contains("ANIM"))return WebpAnimation.decode(input,columns,rows,seconds,threshold,invert,scale,dither,filename(source));
             // Animated WebP is read without programs, so only now is it known whether this import needs them.
-            askForTools(source,cache,consent);
+            askForTools(null,cache,consent,status);
             Path executable=decoder(cache,status);status.accept("converting");
             boolean still=header.length>2 && ((header[0]==(byte)0x89 && !brand.contains("acTL")) || header[0]==(byte)0xFF || brand.contains("heic") || brand.contains("heix") || brand.contains("mif1") || brand.contains("avif") || brand.startsWith("BM") || (header[0]==0 && header[1]==0 && header[2]==1) || (brand.startsWith("RIFF") && !brand.contains("ANIM")));
             // Probe the first decoded frame, including rotation, using the same bounded decoder.
