@@ -122,7 +122,7 @@ device: its sound is mixed in memory on an OpenAL loopback device, so nothing it
 screenshots and the control API still work. The game runs in a terminal named `minecraft` in the agent's T3 Code
 thread; press Ctrl+J in that thread to see its console. Close that terminal, or run `devStop`, to stop the game.
 
-- **Launch Minecraft** in a checkout whose game is already running shows its window, moves its sound to your real device,
+- **Launch Minecraft** in a checkout whose game is already running shows its window in front of your other windows, moves its sound to your real device,
   puts its frame rate back to your settings, and follows its log instead of launching a second game. Stopping that console leaves the game
   running.
 - Minimizing a worktree's game hides it again, so the agent can keep using it. A normal minimize would stop it

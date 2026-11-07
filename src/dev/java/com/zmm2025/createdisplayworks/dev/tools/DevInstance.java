@@ -2,9 +2,14 @@ package com.zmm2025.createdisplayworks.dev.tools;
 
 import com.google.gson.JsonObject;
 import com.mojang.blaze3d.platform.Window;
+import com.sun.jna.Pointer;
+import com.sun.jna.platform.win32.Kernel32;
+import com.sun.jna.platform.win32.User32;
+import com.sun.jna.platform.win32.WinDef;
 import net.minecraft.client.Minecraft;
 import net.minecraft.sounds.SoundSource;
 import org.lwjgl.glfw.GLFW;
+import org.lwjgl.glfw.GLFWNativeWin32;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,6 +65,8 @@ final class DevInstance {
         write(minecraft.gameDirectory.toPath().resolve("dev-instance.json"), info);
         if(!worktree.isEmpty()) write(Path.of(worktree, "build", "dev-client.json"), info);
         if(hidden) throttle(minecraft.getWindow(), true);
+        // The loading window opened behind the app the user launched the game from.
+        else bringToFront(minecraft.getWindow().getWindow());
         if(WORKTREE_INSTANCE) {
             // A minimized window stops drawing, which would break screenshots, so minimizing hides it instead.
             GLFW.glfwSetWindowIconifyCallback(minecraft.getWindow().getWindow(), (window, iconified) -> {
@@ -140,17 +147,49 @@ final class DevInstance {
         Window window = minecraft.getWindow();
         long handle = window.getWindow();
         if(hide) {
+            // A grabbed mouse is held inside the window, and hiding the window doesn't let it go, which would leave the
+            // user's cursor trapped in an invisible rectangle. Release it while the window still has focus.
+            if(minecraft.mouseHandler.isMouseGrabbed()) minecraft.mouseHandler.releaseMouse();
             if(GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_ICONIFIED) == GLFW.GLFW_TRUE) GLFW.glfwRestoreWindow(handle);
             GLFW.glfwHideWindow(handle);
         } else {
             GLFW.glfwShowWindow(handle);
             if(GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_ICONIFIED) == GLFW.GLFW_TRUE) GLFW.glfwRestoreWindow(handle);
             GLFW.glfwFocusWindow(handle);
+            bringToFront(handle);
             DevInput.windowShown();
         }
         hidden = hide;
         DevAudio.useSilentDevice(hide);
         throttle(window, hide);
+    }
+
+    /**
+     * Puts the window in front and gives it focus. Windows only lets the app the user last clicked take focus, so
+     * GLFW's focus request fails for a game that Gradle started, and the window opens behind the app the user pressed
+     * Launch Minecraft in. Joining the input of that app's thread for a moment gets past this.
+     */
+    private static void bringToFront(long handle) {
+        if(!System.getProperty("os.name").startsWith("Windows")) return;
+        try {
+            User32 user32 = User32.INSTANCE;
+            WinDef.HWND window = new WinDef.HWND(new Pointer(GLFWNativeWin32.glfwGetWin32Window(handle)));
+            WinDef.HWND foreground = user32.GetForegroundWindow();
+            if(window.equals(foreground)) return;
+            int thread = Kernel32.INSTANCE.GetCurrentThreadId();
+            int foregroundThread = foreground == null ? 0 : user32.GetWindowThreadProcessId(foreground, null);
+            boolean attached = foregroundThread != 0 && foregroundThread != thread
+                    && user32.AttachThreadInput(new WinDef.DWORD(thread), new WinDef.DWORD(foregroundThread), true);
+            try {
+                user32.BringWindowToTop(window);
+                user32.SetForegroundWindow(window);
+                user32.SetFocus(window);
+            } finally {
+                if(attached) user32.AttachThreadInput(new WinDef.DWORD(thread), new WinDef.DWORD(foregroundThread), false);
+            }
+        } catch(Throwable e) {
+            LOGGER.warn("Could not bring the game window to the front", e);
+        }
     }
 
     /**
