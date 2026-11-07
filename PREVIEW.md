@@ -22,13 +22,13 @@ Empty bar slots used to differ only by color, which a board can't show. They now
 | --- | --- |
 | ![Before: every gauge shows five identical bars](boiler-before.png) | ![After: Heat shows one bar and four empty slots](boiler-after.png) |
 
-### Quarter turns
+### Turns and flips
 
-A board turned 90° on a bearing now clears, like Create's display boards.
+A board turned 90° or 180° on a bearing now clears, like Create's display boards. Turning about the vertical axis keeps its content, as Create's does.
 
-| Our board, before the turn | Our board, after | Create's board, after |
-| --- | --- | --- |
-| ![TOP and LOW on a 3×2 board](ours-3x2-90-start.png) | ![The same tiles, now 2×3 and blank](ours-3x2-90-end.png) | ![Create's board, also blank](create-3x2-90-end.png) |
+| Before the turn | 90° | Create's board, 90° | 180° |
+| --- | --- | --- | --- |
+| ![TOP and LOW on a 3×2 board](ours-3x2-90-start.png) | ![Now 2×3 and blank](ours-3x2-90-end.png) | ![Create's board, also blank](create-3x2-90-end.png) | ![Blank after half a turn](ours-3x2-180-end.png) |
 
 ### Trains
 
@@ -50,15 +50,15 @@ Claim mods can't tell the client that a board is protected, so the placement gho
 
 ### Media Tools
 
-The first import that needs tools now asks first, instead of a note on the empty screen. Turning Media Tools off still gives an error when importing.
+An import that needs tools now asks first, at the moment it needs them, instead of a note on the empty screen. Animated WebP needs no tools, so it never asks. Turning Media Tools off still gives an error when importing.
 
-| Before | After | Setting off |
-| --- | --- | --- |
-| ![The note on the empty screen](import-first-use.png) | ![The Download media tools popup](popup.png) | ![Media Tools are off](import-off-error.png) |
+| Before | After | Animated WebP, tools missing | Setting off |
+| --- | --- | --- | --- |
+| ![The note on the empty screen](import-first-use.png) | ![The Download media tools popup](popup.png) | ![Imported without a popup](webp-no-popup.png) | ![Media Tools are off](import-off-error.png) |
 
 ### Schematicannon
 
-Printed boards match Create's: same blocks and cost, blank content. The tile borders now match the source board.
+Printed boards match Create's, from a Schematicannon or the creative Print tool: same blocks and cost, blank content. The tile borders now match the source board.
 
 | Source | Printed | Written to after printing |
 | --- | --- | --- |
