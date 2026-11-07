@@ -56,7 +56,7 @@ final class DevCamera {
         while(System.nanoTime() < deadline && minecraft.submit(() -> minecraft.player.position().distanceTo(feet) > 0.05).get(1, TimeUnit.MINUTES)) Thread.sleep(10);
 
         JsonObject response = query.containsKey("screenshot") && !"false".equals(query.get("screenshot"))
-            ? DevTools.screenshot(!"false".equals(query.get("hud")), 1, 0, null, query.get("keep")) : DevTools.ok();
+            ? DevTools.screenshot(!"false".equals(query.get("hud")), 1, 0, null, query.get("keep"), false) : DevTools.ok();
         response.addProperty("face", face.getName());
         response.addProperty("distance", DevTools.round(distance));
         response.addProperty("eye", DevTools.round(eye.x) + " " + DevTools.round(eye.y) + " " + DevTools.round(eye.z));

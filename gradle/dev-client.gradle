@@ -143,7 +143,9 @@ tasks.matching { it.name == 'runDevClient' }.configureEach {
     // One action, because each doFirst runs before the ones declared above it.
     doFirst {
         DevInstances.removeOrphans(devRunDir, it.logger)
+        DevInstances.pruneEvidence(devRunDir, it.logger)
         DevClientLauncher.showIfRunning(devInstanceDir, devHidden, it.logger)
+        DevInstances.clearScratch(devInstanceDir)
         if (devIsWorktree) DevInstances.prepare(devRunDir, devInstanceDir, checkout, devWorldName, devControlPort, it.logger)
         DevInstances.setLoadingWindow(devInstanceDir, !devHidden)
         List<File> jars = devModSet ? DevModSets.jars(devModSet, devModSetFile, devModCache, devModSetRefresh, it.logger) : DevMods.jars(devModsSource, it.logger)
@@ -187,7 +189,7 @@ class DevModSets {
             if (refresh || !resolved.exists()) {
                 logger.lifecycle("Dev mods: resolving set '${name}' on Modrinth")
                 resolved.parentFile.mkdirs()
-                resolved.text = JsonOutput.prettyPrint(JsonOutput.toJson(resolve(sets[name] as List<String>)))
+                resolved.text = JsonOutput.prettyPrint(JsonOutput.toJson(resolve(sets[name] as List)))
             }
             (new JsonSlurper().parse(resolved) as List<Map>).each { Map mod -> jars[mod.file as String] = download(mod, cache, logger) }
         }
@@ -195,17 +197,27 @@ class DevModSets {
         return jars.values() as List
     }
 
-    /** Each entry is a Modrinth slug, or slug@version to pin one. */
-    private static List<Map> resolve(List<String> projects) {
+    /** Each entry is a Modrinth slug, slug@version to pin one, or for a mod that's elsewhere, {maven: <repo>, id: <group:artifact:version>}. */
+    private static List<Map> resolve(List entries) {
         Map<String, Map> chosen = [:]
-        projects.each { String entry ->
+        entries.findAll { it instanceof String }.each { String entry ->
             def (String project, String pin) = entry.tokenize('@') + [null]
             add(project, pin, null, chosen)
         }
-        return chosen.values().collect { Map version ->
+        List<Map> mods = chosen.values().collect { Map version ->
             Map file = (version.files as List<Map>).find { it.primary } ?: (version.files as List<Map>).first()
             [project: version.project_id, version: version.version_number, file: file.filename, url: file.url, sha1: (file.hashes as Map).sha1]
         }
+        return mods + entries.findAll { it instanceof Map }.collect { maven(it as Map) }
+    }
+
+    private static Map maven(Map entry) {
+        def (String group, String artifact, String version) = (entry.id as String).tokenize(':')
+        String file = "${artifact}-${version}.jar"
+        String url = "${entry.maven}/${group.replace('.', '/')}/${artifact}/${version}/${file}"
+        HttpResponse<String> sha1 = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build().send(request("${url}.sha1"), HttpResponse.BodyHandlers.ofString())
+        if (sha1.statusCode() != 200) throw new GradleException("${entry.maven} answered ${sha1.statusCode()} for ${file}.sha1")
+        return [project: artifact, version: version, file: file, url: url, sha1: sha1.body().trim()]
     }
 
     private static void add(String project, String pin, String versionId, Map<String, Map> chosen) {
@@ -320,6 +332,7 @@ class DevMods {
 class DevInstances {
     /** Names the worktree a game folder belongs to, so the folder can be deleted once that worktree is gone. */
     static final String OWNER = 'dev-worktree.txt'
+    static final int KEPT_DAYS = 14, KEPT_MEGABYTES = 250, SCRATCH_DAYS = 2
     /** What a worktree's game copies from the main game folder besides the test world. */
     static final List<String> COPIED = ['options.txt', 'config', 'defaultconfigs', 'emi.json', 'resourcepacks', 'schematics',
                                         'usercache.json', 'usernamecache.json']
@@ -366,6 +379,43 @@ class DevInstances {
             if (new File(worktree, '.git').exists() || running(dir)) return
             if (worktree.isDirectory() && worktree.deleteDir()) logger.lifecycle("Dev client: finished deleting removed worktree ${worktree}")
             if (dir.deleteDir()) logger.lifecycle("Dev client: deleted the game folder of removed worktree ${worktree.name}")
+        }
+    }
+
+    /**
+     * Keeps images shown in chat from piling up. Chat reads them from disk, so deleting one breaks it in that thread,
+     * which is why they outlive their worktree at all. Once a worktree has been gone for {@link #KEPT_DAYS} days its
+     * images go, the main checkout's go at the same age, and the oldest go first past {@link #KEPT_MEGABYTES} in total.
+     */
+    static void pruneEvidence(File runDir, Logger logger) {
+        File root = new File(runDir, 'evidence')
+        if (!root.isDirectory()) return
+        long oldest = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(KEPT_DAYS)
+        List<File> kept = []
+        root.listFiles().findAll { it.isDirectory() }.each { File folder ->
+            List<File> files = folder.listFiles().findAll { it.isFile() }
+            boolean worktreeGone = folder.name != 'main' && !new File(runDir, "worktrees/${folder.name}").exists()
+            if (worktreeGone && files.every { it.lastModified() < oldest }) {
+                folder.deleteDir()
+                logger.lifecycle("Dev client: deleted the kept images of removed worktree ${folder.name}")
+                return
+            }
+            if (folder.name == 'main') files = files.findAll { it.lastModified() >= oldest || !it.delete() }
+            kept.addAll(files)
+        }
+        long total = kept.sum(0L) { it.length() } as long
+        for (File file : kept.sort { it.lastModified() }) {
+            if (total <= KEPT_MEGABYTES * 1024 * 1024) break
+            total -= file.length()
+            file.delete()
+        }
+    }
+
+    /** Scratch captures in a game's folder only matter during the work that made them. */
+    static void clearScratch(File gameDir) {
+        long oldest = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(SCRATCH_DAYS)
+        new File(gameDir, 'screenshots/dev-tools').listFiles()?.findAll { it.lastModified() < oldest }?.each { File old ->
+            if (old.isDirectory()) old.deleteDir() else old.delete()
         }
     }
 

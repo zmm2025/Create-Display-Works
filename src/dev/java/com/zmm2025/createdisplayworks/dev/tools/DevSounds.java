@@ -55,8 +55,10 @@ final class DevSounds {
             response.addProperty("ok", true);
             response.addProperty("listener", DevTools.round(ear.x) + " " + DevTools.round(ear.y) + " " + DevTools.round(ear.z));
             response.addProperty("masterVolume", minecraft.options.getSoundSourceVolume(SoundSource.MASTER));
-            // What the sound engine actually plays at: 0 while the window is hidden, whatever the option says.
+            // What the sound engine actually plays at.
             response.addProperty("outputGain", DevTools.round(AL10.alGetListenerf(AL10.AL_GAIN)));
+            // A hidden game's sound goes into memory, so it can't reach the speakers.
+            response.addProperty("silentDevice", DevAudio.active());
 
             JsonArray playing = new JsonArray();
             for(SoundInstance sound : channels(minecraft.getSoundManager()).keySet()) {

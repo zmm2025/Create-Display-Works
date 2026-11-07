@@ -149,6 +149,7 @@ final class DevInstance {
             DevInput.windowShown();
         }
         hidden = hide;
+        DevAudio.useSilentDevice(hide);
         throttle(window, hide);
     }
 
@@ -173,7 +174,8 @@ final class DevInstance {
         Window window = minecraft.getWindow();
         int limit = fpsOverride != null ? fpsOverride : Math.min(HIDDEN_FPS, minecraft.options.framerateLimit().get());
         if(window.getFramerateLimit() != limit) window.setFramerateLimit(limit);
-        minecraft.getSoundManager().updateSourceVolume(SoundSource.MASTER, 0);
+        // On the silent device nothing can be heard, and recordings keep their real levels.
+        if(!DevAudio.active()) minecraft.getSoundManager().updateSourceVolume(SoundSource.MASTER, 0);
     }
 
     private static void check(String worktree) {

@@ -70,7 +70,8 @@ final class DevControlServer {
             case "/reload" -> DevTools.reload(query.get("worktree"), Boolean.parseBoolean(query.get("full")));
             case "/command" -> DevTools.command(body.isBlank() ? query.getOrDefault("command", "") : body);
             case "/screenshot" -> DevTools.screenshot(!"false".equals(query.get("hud")), Integer.parseInt(query.getOrDefault("frames", "1")),
-                Integer.parseInt(query.getOrDefault("intervalMs", "100")), query.get("video"), query.get("keep"));
+                Integer.parseInt(query.getOrDefault("intervalMs", "100")), query.get("video"), query.get("keep"), Boolean.parseBoolean(query.get("audio")));
+            case "/audio" -> DevAudio.audio(query);
             case "/sounds" -> DevSounds.sounds(Long.parseLong(query.getOrDefault("sinceMs", "3000")), query.get("filter"));
             case "/find" -> DevInspect.find(query);
             case "/camera" -> DevCamera.camera(query);

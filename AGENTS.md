@@ -71,7 +71,7 @@ capture demos. Endpoints are listed under "Agent control API" in DEVELOPMENT.md.
   in a background shell command, which the user can't see.
 - The port is also in `build/dev-client.json`. Check that `/status` reports this worktree before trusting a result.
 - The window stays hidden unless the user shows it. Don't call `/window?show=true` yourself.
-- `./gradlew devRestart -PthreadId=<id>` restarts it. Add `-PdevModSet=rendering` (or `claims`, `addons`,
+- `./gradlew devRestart -PthreadId=<id>` restarts it. Add `-PdevModSet=rendering` (or `claims`, `ftb`, `addons`,
   `interaction`, or several with commas) to test with other mods from a cache all worktrees share.
 
 Anything a player can do, you can do. Keep tests cheap: batch steps, read text instead of screenshots, and use
@@ -95,7 +95,9 @@ fixtures instead of building by hand. "Agent control API" and "Testing tips" in 
   for a 10 FPS animation, and use `timesMs` for the actual capture times.
 - Delete screenshots and frame folders you no longer need from the `screenshots/dev-tools/` folder next to the PNGs.
   Never delete kept images (see [Images in chat](#images-in-chat)).
-- `/sounds` shows what the game plays and how loud it reaches the player. Use it instead of recording audio.
+- `/sounds` shows what the game plays and how loud it reaches the player. Use it for most sound checks. When how a
+  sound actually sounds matters, `/audio` records it, and `audio=true` adds it to an MP4. A hidden game's sound goes
+  into memory and can't reach the user's speakers.
 - `/blockentity` reads a block entity's fields on the client and server, and can sample them every frame. Use it
   instead of adding temporary debug logging.
 - Send several steps as one JSON array to `/command`, with `waitTicks` or `waitUntil` steps instead of `sleep`, and
@@ -123,12 +125,13 @@ asked. Do this for each change, not one summary image. A text description doesn'
 
 - Capture the before while the game still runs the old code, before your first edit. If a before image truly can't be
   captured, say so.
-- Add `keep=<name>` to `/screenshot` or `/camera`. The response's `markdown` is ready to paste into your reply.
+- Add `keep=<name>` to `/screenshot` or `/camera` only for images you'll embed; everything else stays scratch. The
+  response's `markdown` is ready to paste into your reply.
 - For motion, add `frames=<n>&intervalMs=<ms>&video=gif` to `/screenshot`. `keep` saves the GIF and its contact sheet.
-- Chat reads an image from disk every time it's shown, so a deleted file shows up broken. Kept images live in the
-  main checkout's `run/evidence/<worktree>/`, which survives the worktree. Never delete them, and embed nothing from
-  `screenshots/dev-tools/`, a scratch folder or `build/`. Copy an image from anywhere else into the `evidenceDirectory`
-  that `/status` reports first.
+- Chat reads an image from disk every time it's shown, so a deleted file shows up broken. Kept files live in the
+  main checkout's `run/evidence/<worktree>/`, which outlives the worktree for a while and is pruned automatically
+  ("Images in chat" in DEVELOPMENT.md). Don't delete them by hand, and embed nothing from `screenshots/dev-tools/`,
+  a scratch folder or `build/`. Copy an image from anywhere else into the `evidenceDirectory` that `/status` reports.
 - Open each image before you embed it. A wrong camera angle proves nothing.
 - Subagents capture the evidence and return the absolute image paths. The parent thread embeds them.
 
@@ -170,7 +173,8 @@ workflow then puts it in the PR's Preview section.
     videos the user drags in
   - links for anything else, such as changed sound files, `/sounds` or `/perf` output, or logs
   - nothing, when there's nothing to see
-- The control API records no audio. If hearing a sound matters, say so in your reply, so the user can record it.
+- If hearing a sound matters, add an MP4 with `audio=true`, or link an `/audio` recording. You can't listen to it, so
+  check its levels, and tell the user when a sound needs their ears.
 - Write `build/pr-evidence/PREVIEW.md` and run `./gradlew prEvidence` before your final reply. A file it names that
   isn't in that folder is copied from this worktree's kept images, so use their file names. Rerun it whenever later
   work changes what the evidence shows, and remove files that no longer apply.

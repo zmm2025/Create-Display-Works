@@ -468,11 +468,12 @@ public final class DevTools {
      * also gets a contact sheet, up to 36 evenly spread frames in one image, left to right then top to bottom, and
      * optionally a {@code video} (mp4 or gif) that plays at the speed the frames were captured. Without the HUD, an
      * open chat is closed first; any other open screen is named in {@code screen}, since it still shows. {@code keep}
-     * also copies the result, under that name, to the evidence folder.
+     * also copies the result, under that name, to the evidence folder. {@code audio} records the game's sound into an MP4.
      */
-    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video, String keep) throws Exception {
+    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video, String keep, boolean audio) throws Exception {
         if(frames < 1 || frames > 600 || intervalMs < 0 || intervalMs > 10_000) return failure("Use 1-600 frames and an interval of 0-10000 ms.");
         if(video != null && frames < 2) return failure("A video needs at least 2 frames.");
+        if(audio && !"mp4".equalsIgnoreCase(video)) return failure("Sound needs video=mp4; a GIF has no soundtrack.");
         Minecraft minecraft = Minecraft.getInstance();
         String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS"));
         Path folder = minecraft.gameDirectory.toPath().resolve("screenshots/dev-tools").toAbsolutePath().normalize();
@@ -480,6 +481,7 @@ public final class DevTools {
         if(frames == 1) files.add(folder.resolve(name + ".png"));
         else for(int i = 0; i < frames; i++) files.add(folder.resolve(name).resolve(String.format("frame-%03d.png", i)));
         PendingScreenshot pending = new PendingScreenshot(files, intervalMs * 1_000_000L);
+        long audioStart = audio ? DevAudio.start() : 0;
         String screen = minecraft.submit(() -> {
             if(!hud && minecraft.screen instanceof ChatScreen) minecraft.setScreen(null);
             pending.hideGuiBefore = minecraft.options.hideGui;
@@ -487,7 +489,12 @@ public final class DevTools {
             screenshot = pending;
             return minecraft.screen == null ? null : minecraft.screen.getClass().getSimpleName();
         }).get(1, TimeUnit.MINUTES);
-        pending.result.get(30 + (long)frames * intervalMs / 1000, TimeUnit.SECONDS);
+        Path recording;
+        try {
+            pending.result.get(30 + (long)frames * intervalMs / 1000, TimeUnit.SECONDS);
+        } finally {
+            recording = audio ? DevAudio.stop() : null;
+        }
         JsonObject response = new JsonObject();
         response.addProperty("ok", true);
         if(screen != null) response.addProperty("screen", screen);
@@ -512,7 +519,7 @@ public final class DevTools {
         response.add("gameTimes", gameTimes);
         if(video != null) {
             try {
-                response.addProperty("video", DevVideo.encode(files, pending.times, video).toString());
+                response.addProperty("video", DevVideo.encode(files, pending.times, video, recording, (pending.start - audioStart) / 1e9).toString());
             } catch(IOException | IllegalArgumentException e) {
                 response.addProperty("videoError", e.getMessage());
             }
@@ -537,7 +544,7 @@ public final class DevTools {
     }
 
     /** Copies a capture to the evidence folder, never over an earlier one, since chat may already show that file. */
-    private static void keep(String label, List<Path> captures, JsonObject response) throws IOException {
+    static void keep(String label, List<Path> captures, JsonObject response) throws IOException {
         Path folder = evidenceDirectory();
         Files.createDirectories(folder);
         String name = label.replaceAll("[^a-zA-Z0-9._-]", "-");
@@ -601,7 +608,7 @@ public final class DevTools {
             if(query.containsKey("entity")) {
                 var entity = minecraft.level.getEntity(Integer.parseInt(query.get("entity")));
                 if(entity == null) return failure("No entity with that id is loaded.");
-                target = new EntityHitResult(entity);
+                target = new EntityHitResult(entity, entity.getBoundingBox().getCenter());
             } else if(query.containsKey("x")) {
                 BlockPos pos = new BlockPos(Integer.parseInt(query.get("x")), Integer.parseInt(query.get("y")), Integer.parseInt(query.get("z")));
                 Direction face = Direction.byName(query.getOrDefault("face", "up"));
@@ -613,7 +620,12 @@ public final class DevTools {
             if(use) {
                 InteractionResult result = switch(target == null ? HitResult.Type.MISS : target.getType()) {
                     case BLOCK -> minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, (BlockHitResult)target);
-                    case ENTITY -> minecraft.gameMode.interact(player, ((EntityHitResult)target).getEntity(), InteractionHand.MAIN_HAND);
+                    case ENTITY -> {
+                        // In this order, as a real click does; armor stands and others only answer the first.
+                        EntityHitResult hit = (EntityHitResult)target;
+                        InteractionResult at = minecraft.gameMode.interactAt(player, hit.getEntity(), hit, InteractionHand.MAIN_HAND);
+                        yield at.consumesAction() ? at : minecraft.gameMode.interact(player, hit.getEntity(), InteractionHand.MAIN_HAND);
+                    }
                     case MISS -> InteractionResult.PASS;
                 };
                 if(!result.consumesAction()) result = minecraft.gameMode.useItem(player, InteractionHand.MAIN_HAND);

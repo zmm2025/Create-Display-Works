@@ -105,24 +105,25 @@ place of the Modrinth profile. Several sets work, separated by commas: `-PdevMod
 | `rendering` | Sodium, Iris, Entity Culling |
 | `claims` | Open Parties and Claims |
 | `addons` | Create Crafts & Additions, Enchantment Industry, Connected, Big Cannons, New Age, Copycats+ |
+| `ftb` | FTB Chunks, FTB Teams, FTB Library, Architectury |
 | `interaction` | Carry On, WorldEdit, Jade, EMI |
 
-Sets live in [gradle/dev-mod-sets.json](gradle/dev-mod-sets.json) as Modrinth project slugs, or `slug@version` to pin
-a version. Required dependencies come along. The first use downloads the jars into
+Sets live in [gradle/dev-mod-sets.json](gradle/dev-mod-sets.json) as Modrinth project slugs, `slug@version` to pin
+a version, or `{"maven": <repository>, "id": "<group:artifact:version>"}` for a mod that isn't on Modrinth. Modrinth's
+required dependencies come along; list a Maven mod's yourself. The first use downloads the jars into
 `~/.gradle/create-display-works/dev-mods`, which every worktree shares, so later uses need no network. Add
 `-PdevModSetRefresh` to look for newer versions. A later launch without `-PdevModSet` goes back to the profile.
-
-Mods that aren't on Modrinth, such as FTB Chunks, need a folder of jars and `-PdevModsProfile=<absolute path>`.
 
 ### Hidden games and switching in
 
 Each checkout runs at most one game. An agent starts its worktree's game with `devStart`, which keeps the window
-hidden: it doesn't appear, take focus or show in the taskbar, and it's muted and limited to 30 FPS. Rendering,
+hidden: it doesn't appear, take focus or show in the taskbar, and it's limited to 30 FPS. It never opens your sound
+device: its sound is mixed in memory on an OpenAL loopback device, so nothing it plays can reach your speakers. Rendering,
 screenshots and the control API still work. The game runs in a terminal named `minecraft` in the agent's T3 Code
 thread; press Ctrl+J in that thread to see its console. Close that terminal, or run `devStop`, to stop the game.
 
-- **Launch Minecraft** in a checkout whose game is already running shows its window, with its sound and frame rate back
-  to your settings, and follows its log instead of launching a second game. Stopping that console leaves the game
+- **Launch Minecraft** in a checkout whose game is already running shows its window, moves its sound to your real device,
+  puts its frame rate back to your settings, and follows its log instead of launching a second game. Stopping that console leaves the game
   running.
 - Minimizing a worktree's game hides it again, so the agent can keep using it. A normal minimize would stop it
   drawing frames.
@@ -187,11 +188,12 @@ returns JSON with an `ok` field. Requests run one at a time.
 | `POST /window` | `?show=true` or `?show=false`; `?fps=<n>`, `unlimited` or `default`; `?width=&height=` | Shows the window and brings it to the front, or hides it. `fps` replaces a hidden game's 30 FPS cap until `default` undoes it. `width` and `height` resize the window, which changes what screenshots and screens lay out. |
 | `POST /quit` | | Closes the game the way its close button does, saving the world. It answers before the game has exited; `devStop` waits for that. |
 | `POST /command` | body: a command, with or without `/`, or a JSON array of steps | Runs the command as the player at permission level 4. Client commands, such as `flywheel backend`, run on the client. Returns the chat output and whether it succeeded. On a remote server, the command goes through chat with the player's own permissions, and failure means a red reply. An array runs its steps in order and returns `results`, one per step. A step is a command, `{"waitTicks": 20}`, `{"waitUntil": "<command>", "timeoutTicks": 200}`, which reruns the command each tick until it succeeds and stops the batch if it never does, or `{"call": "/key?key=w&ticks=20", "body": "..."}`, which runs any endpoint here and stops the batch if it fails. Consecutive commands run within one server tick. `tp` and `teleport` turn creative flight on first, so the player doesn't fall. |
-| `POST /screenshot` | `?hud=false` hides the HUD; `?frames=<n>&intervalMs=<ms>` (up to 600 frames, default interval 100 ms; `0` takes consecutive frames) captures a sequence; `&video=mp4` or `&video=gif` also encodes it; `&keep=<name>` keeps the result for chat | Saves PNGs under `screenshots/dev-tools/` in the game's folder and returns their paths. A sequence also returns `sheet`, one image with up to 36 evenly spread frames tiled left to right and top to bottom (`sheetFrames` lists which, when some are left out), `timesMs`, when each frame was taken, and `gameTimes`, the game time in ticks (with the partial tick) each frame drew. Frames are saved in the background, so a sequence doesn't slow the game down. `video` is made with ffmpeg and plays at the speed the frames were captured; an MP4 runs at 60 FPS and a GIF at 30 FPS, at most 960 pixels wide. With `hud=false`, an open chat is closed first; any other open screen still shows and is named in `screen`. `keep` copies the image, or the video and contact sheet, to the evidence folder, and returns `kept` and ready-to-paste `markdown`. See [Images in chat](#images-in-chat). |
+| `POST /screenshot` | `?hud=false` hides the HUD; `?frames=<n>&intervalMs=<ms>` (up to 600 frames, default interval 100 ms; `0` takes consecutive frames) captures a sequence; `&video=mp4` or `&video=gif` also encodes it; `&audio=true` records the game's sound into an MP4; `&keep=<name>` keeps the result for chat | Saves PNGs under `screenshots/dev-tools/` in the game's folder and returns their paths. A sequence also returns `sheet`, one image with up to 36 evenly spread frames tiled left to right and top to bottom (`sheetFrames` lists which, when some are left out), `timesMs`, when each frame was taken, and `gameTimes`, the game time in ticks (with the partial tick) each frame drew. Frames are saved in the background, so a sequence doesn't slow the game down. `video` is made with ffmpeg and plays at the speed the frames were captured; an MP4 runs at 60 FPS and a GIF at 30 FPS, at most 960 pixels wide. With `hud=false`, an open chat is closed first; any other open screen still shows and is named in `screen`. `keep` copies the image, or the video and contact sheet, to the evidence folder, and returns `kept` and ready-to-paste `markdown`. See [Images in chat](#images-in-chat). |
 | `POST /camera` | `?x=&y=&z=`; optional `&face=north` (default: the side the player is on), `&distance=3` or `&fit=<W>` / `&fit=<W>x<H>`, `&screenshot=true`, `&hud=false`, `&keep=<name>` | Flies the player to look straight at that point from `distance` blocks off the given face, or far enough back that `W` by `H` blocks fill the view. Block coordinates aim at the block's center; decimals aim at that exact point. Waits until the client has moved, and can take a screenshot in the same call. |
 | `POST /look` | `?yaw=&pitch=`, `?dx=&dy=` (degrees from the current view), `?x=&y=&z=` or `?entity=<id>` | Turns the player without moving them, and returns the new crosshair target. |
 | `GET /perf` | optional `?seconds=5` (0.5-60), `&namespace=<mod id>` (default: this mod), `&fps=<n>` or `&fps=unlimited` | Replaces a hidden game's frame rate cap for the measurement, if asked. Measures for that long and returns frame times (`avg`, `p50`, `p95`, `p99`, `max` in ms, and FPS), the CPU time each of the mod's block entity renderers takes per frame and how many it draws, server tick times over the last 100 ticks, and heap use. Renderer times cover building the geometry, not GPU time. |
-| `GET /sounds` | optional `?sinceMs=3000&filter=<text in the sound id>` | Sounds holding a channel now (`playing`), with `heardGain`, the volume estimated to reach the player after the category slider and distance, and every sound started in the last `sinceMs` (`started`). Master volume is reported separately: `masterVolume` is the setting, `outputGain` what the sound engine plays at (0 while the window is hidden). |
+| `GET /sounds` | optional `?sinceMs=3000&filter=<text in the sound id>` | Sounds holding a channel now (`playing`), with `heardGain`, the volume estimated to reach the player after the category slider and distance, and every sound started in the last `sinceMs` (`started`). Master volume is reported separately: `masterVolume` is the setting, `outputGain` what the sound engine plays at. `silentDevice` says the game's sound is going into memory. |
+| `POST /audio` | `?seconds=5` (up to 300), or `?action=start` and later `?action=stop`; optional `&keep=<name>` | Records what the game plays to a WAV in `screenshots/dev-tools/`, and returns its `seconds`, `peakDb`, `rmsDb` and whether it's `silent`. `keep` saves an MP3 for chat. Only a hidden game can record, since only its sound stays in memory. |
 | `GET /find` | `?block=<id or #tag>` or `?namespace=<mod id>`; optional `&radius=16` (up to 64), `&x=&y=&z=` (default: the player), `&limit=100` | Loaded blocks that match within a cube, nearest first, with their block states. |
 | `GET /blockentity` | `?x=&y=&z=`; optional `&side=client\|server\|both`, `&fields=a,b.c`, `&all=true`, `&depth=2`, `&frames=<n>&intervalMs=<ms>` | The block entity's fields there, read by reflection on each side: this mod's own fields, or with `all=true` also those inherited from Create and vanilla (this mod's own objects are expanded `depth` levels). `fields` picks fields or dotted paths. With `frames`, the client side is sampled on that many rendered frames (up to 600; `intervalMs=0` takes every frame), each with its game time and partial tick, to follow animations. |
 | `GET /entities` | optional `?radius=32&type=<text in the entity id>&limit=50` | Entities near the player, nearest first, with ids for `/look` and `/use`, what they ride, and a train's UUID for carriages. |
@@ -292,8 +294,11 @@ single-player. The server quits after 30 idle minutes with nobody on it, or when
 
 ### Testing tips
 
-- Check sounds with `/sounds` instead of recording audio. A sound that should be audible but is missing from
-  `playing`, or has `heardGain` near 0, is the bug.
+- Check sounds with `/sounds` first. A sound that should be audible but is missing from `playing`, or has `heardGain`
+  near 0, is the bug.
+- To check the sound itself, wrap it in `/audio?action=start` and `action=stop` steps. Agents can't listen, so use the
+  levels, or a spectrogram to see pitch and timing: `ffmpeg -i in.wav -lavfi showspectrumpic=s=800x300:scale=log:stop=8000 out.png`.
+  Boards near the player keep rattling, so a "silent" baseline may not be silent.
 - Check animation timing with `/blockentity?...&frames=<n>&intervalMs=0` instead of adding temporary logging. Removing
   logging that used a lambda can force a restart (see [What hot reload covers](#what-hot-reload-covers)).
 - To see motion faster than a frame sequence can catch, slow the game down with `/command` `tick rate 5`, and set it
@@ -311,8 +316,11 @@ single-player. The server quits after 30 idle minutes with nobody on it, or when
   works through `/command`, and persists, so set it back too.
 - Create's kinetic blocks only reach a neighbor a moment after placing. A powered bearing assembles itself when
   rotation reaches it, so place the board and glue first and the motor last. A click on a running bearing stops it.
-- Open Parties and Claims' commands are `/oclaims`, `/oparties` and `/opac`. For FTB Chunks, which needs
-  `-PdevModsProfile`, use `ftbteams server create Name` and `ftbchunks admin claim_as Name#<first 8 characters of the team id>`.
+- Open Parties and Claims' commands are `/oclaims`, `/oparties` and `/opac`.
+- With the `ftb` set, `ftbchunks claim` claims a chunk for the player, and `ftbchunks admin claim_as` for a team. After
+  `ftbteams server create Name`, `/save`, then take the team's id from its file name in
+  `saves/<world>/ftbteams/server/`: the team is `Name#<first 8 characters>`. `ftbteams force-add` didn't accept
+  that form or the full id. A stranger's `/player` right-click answers `"use": "FAIL"` in a claim.
 - Carry On needs empty hands and at most 2.5 blocks of distance. `mods=sneak` on `/click` picks up a block.
 - To force an autosave-only path, such as saved-data cleanup, `tick sprint 6300` runs a save interval quickly.
 - To check what the server does with media packets a modified client could send, type
@@ -382,12 +390,19 @@ work. A worktree's game hides instead of minimizing for this reason.
 ## Images in chat
 
 T3 Code stores an embedded image as its file path and reads the file each time it displays the message: once the file
-is gone, the image's address answers 404 and no new one can be issued. So images shown in chat live in
-`run/evidence/<worktree>/` in the main checkout (`run/evidence/main/` for its own game), which isn't deleted with the
-worktree or its game folder. `keep=<name>` on `/screenshot` or `/camera` puts them there, and never replaces an earlier
-image, since chat may already show it. `/status` reports the folder as `evidenceDirectory`. Git ignores `run/`, so it
-stays out of every branch. Delete folders in it by hand once their threads no longer matter; their images then stop
-displaying in those chats.
+is gone, the image's address answers 404 and no new one can be issued. That's the only reason anything is kept outside
+PR evidence, which GitHub stores separately once it's uploaded.
+
+| Files | Where | Removed |
+| --- | --- | --- |
+| Scratch captures: every screenshot, frame and recording | `screenshots/dev-tools/` in the game's folder | Two days old, at that game's next launch, or with the worktree |
+| Kept files: only what `keep=<name>` saves, for embedding | `run/evidence/<worktree>/` in the main checkout (`run/evidence/main/` for its own game) | 14 days after the worktree is gone. In `main`, at 14 days old. Oldest first past 250 MB in total, across all threads. |
+
+Launches apply these limits, set by `KEPT_DAYS`, `KEPT_MEGABYTES` and `SCRATCH_DAYS` in
+[gradle/dev-client.gradle](gradle/dev-client.gradle). Once a file is pruned, it shows as broken in that old thread.
+
+`keep` never replaces an earlier file, since chat may already show it. `/status` reports the folder as
+`evidenceDirectory`. Git ignores `run/`, so it stays out of every branch.
 
 ## PR evidence
 

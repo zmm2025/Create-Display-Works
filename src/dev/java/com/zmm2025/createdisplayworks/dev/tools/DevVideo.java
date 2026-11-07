@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
@@ -12,7 +13,8 @@ import java.util.concurrent.TimeUnit;
 final class DevVideo {
     private DevVideo() {}
 
-    static Path encode(List<Path> frames, List<Double> timesMs, String format) throws IOException, InterruptedException {
+    /** Encodes the frames, with {@code audio}, starting {@code audioOffset} seconds in, as the soundtrack if given. */
+    static Path encode(List<Path> frames, List<Double> timesMs, String format, Path audio, double audioOffset) throws IOException, InterruptedException {
         String type = format.toLowerCase(Locale.ROOT);
         if(!type.equals("mp4") && !type.equals("gif")) throw new IllegalArgumentException("Use video=mp4 or video=gif.");
         Path folder = frames.get(0).getParent(), list = folder.resolve("frames.ffconcat"), video = folder.resolve("video." + type);
@@ -25,11 +27,30 @@ final class DevVideo {
         // The concat demuxer ignores the last frame's duration unless the frame is listed again.
         concat.append("file '").append(frames.get(frames.size() - 1).getFileName()).append("'\n");
         Files.writeString(list, concat, StandardCharsets.UTF_8);
-        List<String> command = type.equals("mp4")
-            ? List.of("ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list.getFileName().toString(),
-                "-vf", "fps=60,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", video.getFileName().toString())
-            : List.of("ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list.getFileName().toString(),
-                "-vf", "fps=30,scale='min(960,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse", video.getFileName().toString());
+        List<String> command = new ArrayList<>(List.of("-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list.getFileName().toString()));
+        if(audio != null) command.addAll(List.of("-ss", String.format(Locale.ROOT, "%.3f", audioOffset), "-i", audio.toString(), "-c:a", "aac", "-b:a", "192k", "-shortest"));
+        command.addAll(type.equals("mp4")
+            ? List.of("-vf", "fps=60,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", video.getFileName().toString())
+            : List.of("-vf", "fps=30,scale='min(960,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse", video.getFileName().toString()));
+        run(folder, command);
+        Files.deleteIfExists(list);
+        return video;
+    }
+
+    /** A smaller copy of a WAV recording, to keep, or the recording itself if ffmpeg isn't available. */
+    static Path compress(Path wav) throws InterruptedException {
+        Path compressed = wav.resolveSibling(wav.getFileName().toString().replace(".wav", ".mp3"));
+        try {
+            run(wav.getParent(), List.of("-y", "-loglevel", "error", "-i", wav.getFileName().toString(), "-b:a", "128k", compressed.getFileName().toString()));
+            return compressed;
+        } catch(IOException e) {
+            return wav;
+        }
+    }
+
+    private static void run(Path folder, List<String> arguments) throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>(List.of("ffmpeg"));
+        command.addAll(arguments);
         Process process;
         try {
             process = new ProcessBuilder(command).directory(folder.toFile()).redirectErrorStream(true).start();
@@ -42,8 +63,6 @@ final class DevVideo {
             process.destroyForcibly();
             throw new IOException("ffmpeg took longer than 5 minutes.");
         }
-        Files.deleteIfExists(list);
         if(process.exitValue() != 0) throw new IOException("ffmpeg failed: " + output);
-        return video;
     }
 }
