@@ -6,8 +6,6 @@ import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
 import com.simibubi.create.content.trains.graph.DimensionPalette;
-import com.zmm2025.createdisplayworks.flipdot.FlipDotBlock;
-import com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity;
 import java.io.IOException;
 import java.nio.file.*;
 import java.security.*;
@@ -32,8 +30,9 @@ import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 /**
- * Keeps media clips in the world's data folder, so a board's chunk only stores a short reference instead of the
- * whole clip. Files are named after a hash of their contents, so they're written once and identical clips share one.
+ * Keeps media clips in the world's data folder, so a display's chunk only stores a short reference, saved under
+ * {@link MediaPlayback#MEDIA_ID}, instead of the whole clip. Files are named after a hash of their contents, so they're
+ * written once and identical clips share one.
  * <p>
  * Boards claim the clip they show and release it when they're removed or their media is cleared. Contraptions that
  * carry boards claim their clips too, so they're kept while the contraption is unloaded. When the world saves, clips
@@ -123,6 +122,11 @@ public final class MediaStore {
         var claims = Claims.of(level.getServer());
         if (claims.boards.computeIfAbsent(id, k -> new HashSet<>()).add(key(level, pos))) claims.setDirty();
     }
+    /** Whether the display at this position claims the clip. */
+    public static boolean claimed(ServerLevel level, BlockPos pos, String id) {
+        var boards = Claims.of(level.getServer()).boards.get(id);
+        return boards != null && boards.contains(key(level, pos));
+    }
     /** Records that the board at this position no longer shows the clip. */
     public static void release(ServerLevel level, BlockPos pos, String id) {
         var claims = Claims.of(level.getServer());
@@ -180,8 +184,8 @@ public final class MediaStore {
                         server.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(key[0])));
                 BlockPos pos = BlockPos.of(Long.parseLong(key[1]));
                 if (level == null || !level.hasChunkAt(pos)) continue;
-                if (level.getBlockEntity(pos) instanceof FlipDotBlockEntity board
-                        && claim.getKey().equals(board.mediaId())) continue;
+                if (level.getBlockEntity(pos) instanceof MediaDisplay display
+                        && claim.getKey().equals(display.mediaPlayback().id())) continue;
                 boards.remove();
                 changed = true;
             }
@@ -224,19 +228,19 @@ public final class MediaStore {
     /** Adds every board media id found anywhere in saved data. */
     static void collectMediaIds(Tag tag, Set<String> ids) {
         if (tag instanceof CompoundTag compound) {
-            if (compound.get("MediaId") instanceof StringTag id
+            if (compound.get(MediaPlayback.MEDIA_ID) instanceof StringTag id
                     && ID.matcher(id.getAsString()).matches()) ids.add(id.getAsString());
             for (String key : compound.getAllKeys()) collectMediaIds(compound.get(key), ids);
         } else if (tag instanceof ListTag list) for (Tag element : list) collectMediaIds(element, ids);
     }
-    /** The clips shown by the boards a contraption carries. */
+    /** The clips shown by the displays a contraption carries, found by the key they save them under. */
     private static Set<String> mediaOn(AbstractContraptionEntity entity) {
         var contraption = entity.getContraption();
         if (contraption == null) return Set.of();
         Set<String> ids = new HashSet<>();
         for (var block : contraption.getBlocks().values()) {
-            if (!(block.state().getBlock() instanceof FlipDotBlock) || block.nbt() == null) continue;
-            String id = block.nbt().getString("MediaId");
+            if (block.nbt() == null) continue;
+            String id = block.nbt().getString(MediaPlayback.MEDIA_ID);
             if (ID.matcher(id).matches()) ids.add(id);
         }
         return ids;

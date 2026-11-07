@@ -1,13 +1,12 @@
 package com.zmm2025.createdisplayworks.media;
 
-import com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity;
 import java.util.*;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class MediaLimits {
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.IntValue PLAYING_BLOCKS, UPLOAD_MIB, UNUSED_MIB;
-    private static final Map<FlipDotBlockEntity, Integer> PLAYING = new WeakHashMap<>();
+    private static final Map<MediaPlayback, Integer> PLAYING = new WeakHashMap<>();
 
     static {
         var builder = new ModConfigSpec.Builder();
@@ -22,22 +21,26 @@ public final class MediaLimits {
         SPEC = builder.build();
     }
 
-    public static boolean acquire(FlipDotBlockEntity board, int blocks) {
-        PLAYING.keySet()
-                .removeIf(be -> be.isRemoved()
-                        || be.getLevel() == null
-                        || be.getLevel().getServer() != board.getLevel().getServer()
-                        || !be.isMediaPlaying());
+    /** Counts {@code blocks} display blocks as playing for {@code playback}, if that stays within the limit. */
+    public static boolean acquire(MediaPlayback playback, int blocks) {
+        var server = playback.owner().getLevel().getServer();
+        PLAYING.keySet().removeIf(other -> {
+            var owner = other.owner();
+            return owner.isRemoved()
+                    || owner.getLevel() == null
+                    || owner.getLevel().getServer() != server
+                    || !other.isPlaying();
+        });
         int total = PLAYING.entrySet().stream()
-                .filter(e -> e.getKey() != board)
+                .filter(e -> e.getKey() != playback)
                 .mapToInt(Map.Entry::getValue)
                 .sum();
         if (total + blocks > PLAYING_BLOCKS.get()) return false;
-        PLAYING.put(board, blocks);
+        PLAYING.put(playback, blocks);
         return true;
     }
 
-    public static void release(FlipDotBlockEntity board) {
-        PLAYING.remove(board);
+    public static void release(MediaPlayback playback) {
+        PLAYING.remove(playback);
     }
 }

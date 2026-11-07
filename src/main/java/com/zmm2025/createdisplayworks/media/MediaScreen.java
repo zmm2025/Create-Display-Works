@@ -9,7 +9,6 @@ import com.simibubi.create.foundation.gui.widget.IconButton;
 import com.simibubi.create.foundation.gui.widget.ScrollInput;
 import com.simibubi.create.foundation.gui.widget.TooltipArea;
 import com.zmm2025.createdisplayworks.ModBlocks;
-import com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
@@ -778,9 +777,9 @@ public final class MediaScreen extends AbstractSimiScreen {
     private void drawPreview(GuiGraphics g) {
         int px = guiLeft + 29, py = guiTop + 58, pw = 128, ph = 95;
         int front = 0xF9FFFE, back = 0x1D1D21;
-        if (minecraft.level != null && minecraft.level.getBlockEntity(pos) instanceof FlipDotBlockEntity tile) {
-            front = tile.discColor();
-            back = tile.backColor();
+        if (minecraft.level != null && minecraft.level.getBlockEntity(pos) instanceof MediaDisplay display) {
+            front = display.litColor();
+            back = display.unlitColor();
         }
         g.fill(px, py, px + pw, py + ph, 0xFF242424);
         if (busy) {

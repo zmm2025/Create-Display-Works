@@ -1,9 +1,7 @@
 package com.zmm2025.createdisplayworks.media;
 
 import com.zmm2025.createdisplayworks.CreateDisplayWorks;
-import com.zmm2025.createdisplayworks.flipdot.*;
 import java.util.*;
-import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -20,10 +18,11 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
+/**
+ * The media screen's packets, and the server's side of them. They work with any {@link MediaDisplay}; the client's
+ * side is in {@link MediaClientHandler}.
+ */
 public final class MediaNetwork {
-    public static Consumer<Open> openScreen = data -> {};
-    public static Consumer<Status> updateScreen = data -> {};
-    public static Consumer<Part> receiveEditor = data -> {};
     private static final Map<UUID, Upload> UPLOADS = new HashMap<>();
     private static final Map<UUID, Long> EDIT_REQUESTS = new HashMap<>();
     private static final Map<UUID, Long> IMPORT_REQUESTS = new HashMap<>();
@@ -74,21 +73,30 @@ public final class MediaNetwork {
         requests.put(player.getUUID(), now);
         return true;
     }
-    /** Opens the media screen for a display the player just right-clicked, which lets the screen's packets act on it. */
-    public static void open(ServerPlayer player, BlockPos pos, FlipDotAssembly group) {
+    /**
+     * Opens the media screen for a display the player just right-clicked, which lets the screen's packets act on it.
+     * The display checks first that the player may change it, such as with claim protection. A display too large for
+     * media tells the player so instead.
+     */
+    public static void open(ServerPlayer player, BlockPos pos, MediaDisplay.Canvas canvas) {
+        if (!canvas.fitsMedia()) {
+            player.displayClientMessage(
+                    Component.translatable("message.create_display_works.media_canvas_limit"), true);
+            return;
+        }
         SESSIONS.put(player.getUUID(), new Session(player.level().dimension(), pos.immutable()));
-        var controller = group.controller();
+        var playback = canvas.playback();
         PacketDistributor.sendToPlayer(
                 player,
                 new Open(
                         pos,
-                        group.width(),
-                        group.height(),
-                        controller.mediaFilename(),
-                        controller.mediaThumbnail(),
-                        controller.mediaFrameCount(),
-                        controller.mediaPlaybackEnabled(),
-                        controller.mediaLoops()));
+                        canvas.columns(),
+                        canvas.rows(),
+                        playback.filename(),
+                        playback.thumbnail(),
+                        playback.frameCount(),
+                        playback.playbackEnabled(),
+                        playback.loops()));
     }
 
     private static void endSession(UUID player) {
@@ -256,11 +264,13 @@ public final class MediaNetwork {
 
     public static void register(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar("6");
-        registrar.playToClient(Open.TYPE, Open.CODEC, (p, c) -> openScreen.accept(p));
-        registrar.playToClient(Status.TYPE, Status.CODEC, (p, c) -> updateScreen.accept(p));
+        // Lambdas, not method references: a method reference loads its class when the handler is registered, which
+        // would load client classes on a dedicated server. A lambda only loads it once it runs, on the client.
+        registrar.playToClient(Open.TYPE, Open.CODEC, (p, c) -> MediaClientHandler.open(p));
+        registrar.playToClient(Status.TYPE, Status.CODEC, (p, c) -> MediaClientHandler.status(p));
         registrar.playBidirectional(Part.TYPE, Part.CODEC, (p, c) -> {
             if (c.player() instanceof ServerPlayer player) receive(p, player);
-            else receiveEditor.accept(p);
+            else MediaClientHandler.editorPart(p);
         });
         registrar.playToServer(Ack.TYPE, Ack.CODEC, (p, c) -> {
             var transfer = TRANSFERS.get(c.player().getUUID());
@@ -281,39 +291,33 @@ public final class MediaNetwork {
                     endSession(c.player().getUUID());
                 return;
             }
-            var be = editable((ServerPlayer) c.player(), p.pos);
-            if (be == null) return;
-            var group = be.assembly();
-            if (group == null) return;
+            var display = editable((ServerPlayer) c.player(), p.pos);
+            if (display == null) return;
+            var canvas = display.mediaCanvas();
+            if (canvas == null) return;
+            var playback = canvas.playback();
             if (p.action.equals("edit")) {
                 if (!allow(EDIT_REQUESTS, (ServerPlayer) c.player())) {
                     PacketDistributor.sendToPlayer((ServerPlayer) c.player(), new Status(p.pos, "", true, -2, false));
                     return;
                 }
-                var archive = group.controller().mediaArchive();
+                var archive = playback.archive();
                 if (archive != null) {
-                    var transfer = new Transfer(p.pos, group.width(), group.height(), archive);
+                    var transfer = new Transfer(p.pos, canvas.columns(), canvas.rows(), archive);
                     TRANSFERS.put(c.player().getUUID(), transfer);
                     pump(transfer, (ServerPlayer) c.player());
                 }
                 return;
             }
-            if (p.action.equals("clear")) {
-                group.controller().clearMedia();
-                for (int r = 0; r < group.height(); r++) group.controller().setLine(group, r, "");
-            } else group.controller().mediaControl(p.action);
+            if (p.action.equals("clear")) display.clearDisplay();
+            else playback.control(p.action);
             PacketDistributor.sendToPlayer(
                     (ServerPlayer) c.player(),
-                    new Status(
-                            p.pos,
-                            "",
-                            group.controller().mediaLoops(),
-                            group.controller().mediaFrameCount(),
-                            group.controller().mediaPlaybackEnabled()));
+                    new Status(p.pos, "", playback.loops(), playback.frameCount(), playback.playbackEnabled()));
         });
     }
     /** The display at {@code pos}, if its media screen is open for this player and the player may still use it. */
-    private static FlipDotBlockEntity editable(ServerPlayer player, BlockPos pos) {
+    private static MediaDisplay editable(ServerPlayer player, BlockPos pos) {
         var session = SESSIONS.get(player.getUUID());
         if (session == null
                 || !session.pos.equals(pos)
@@ -323,26 +327,26 @@ public final class MediaNetwork {
                 || player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 64
                 || !player.level().hasChunkAt(pos)
                 || !player.level().mayInteract(player, pos)
-                || !(player.level().getBlockEntity(pos) instanceof FlipDotBlockEntity be)) {
+                || !(player.level().getBlockEntity(pos) instanceof MediaDisplay display)) {
             endSession(player.getUUID());
             return null;
         }
-        return be;
+        return display;
     }
 
     private static void receive(Part p, ServerPlayer player) {
         UPLOADS.values().removeIf(u -> u.expires < System.nanoTime());
-        var be = editable(player, p.pos);
-        if (be == null) {
+        var display = editable(player, p.pos);
+        if (display == null) {
             UPLOADS.remove(player.getUUID());
             PacketDistributor.sendToPlayer(player, new Status(p.pos, message("too_far"), true));
             return;
         }
-        var group = be.assembly();
-        if (group == null
-                || p.columns != group.width()
-                || p.rows != group.height()
-                || group.width() * group.height() > MediaClip.MAX_TILES
+        var canvas = display.mediaCanvas();
+        if (canvas == null
+                || p.columns != canvas.columns()
+                || p.rows != canvas.rows()
+                || !canvas.fitsMedia()
                 || p.total < 1
                 || p.total > EditableMedia.MAX_BYTES
                 || p.data.length < 1
@@ -383,9 +387,9 @@ public final class MediaNetwork {
             UPLOADS.remove(player.getUUID());
             try {
                 var clip = MediaClip.fromArchive(upload.data);
-                if (clip.columns() != group.width() || clip.rows() != group.height())
+                if (clip.columns() != canvas.columns() || clip.rows() != canvas.rows())
                     throw new IllegalArgumentException("Board dimensions changed");
-                group.controller().installMedia(clip, upload.data);
+                display.installMedia(clip, upload.data);
                 boolean still = clip.count() == 1;
                 player.displayClientMessage(
                         still

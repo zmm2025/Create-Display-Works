@@ -70,22 +70,21 @@ public final class MediaPacketCommands {
     private static BlockPos pos(CommandContext<CommandSourceStack> c) {
         return c.getArgument("pos", Coordinates.class).getBlockPos(c.getSource());
     }
-    /** Logs what the server answers, then hands it on to the media screen as usual. */
+    /** Logs what the server answers from now on. The media screen still handles it as usual. */
     private static void listen() {
-        if (listening) return;
         listening = true;
-        var status = MediaNetwork.updateScreen;
-        var editor = MediaNetwork.receiveEditor;
-        MediaNetwork.updateScreen = s -> {
+    }
+    /** Called by {@code MediaClientHandlerMixin} for each status the server sends. */
+    public static void received(MediaNetwork.Status s) {
+        if (listening)
             report("status at " + s.pos().toShortString() + ": message='" + s.message() + "' frames=" + s.frames()
                     + " playing=" + s.playing());
-            status.accept(s);
-        };
-        MediaNetwork.receiveEditor = p -> {
+    }
+    /** Called by {@code MediaClientHandlerMixin} for each part of an editor transfer the server sends. */
+    public static void received(MediaNetwork.Part p) {
+        if (listening)
             report("editor part at " + p.pos().toShortString() + ": " + (p.offset() + p.data().length) + "/" + p.total()
                     + " bytes");
-            editor.accept(p);
-        };
     }
 
     private static void report(String text) {

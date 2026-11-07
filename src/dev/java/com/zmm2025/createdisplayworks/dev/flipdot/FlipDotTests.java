@@ -20,6 +20,8 @@ import com.zmm2025.createdisplayworks.flipdot.DotMatrix;
 import com.zmm2025.createdisplayworks.flipdot.FlipDotBlock;
 import com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity;
 import com.zmm2025.createdisplayworks.media.MediaClip;
+import com.zmm2025.createdisplayworks.media.MediaPlayback;
+import com.zmm2025.createdisplayworks.media.MediaStore;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -38,6 +40,7 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeverBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -45,8 +48,8 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
 /**
- * GameTests for the Flip-Dot Display: boards, power, dyes, text, Display Links, media and saving. Registered in
- * {@link DevGameTests}.
+ * GameTests for the Flip-Dot Display: boards, power, dyes, text, Display Links, media, the media store and saving.
+ * Registered in {@link DevGameTests}.
  */
 @PrefixGameTestTemplate(false)
 public final class FlipDotTests {
@@ -163,7 +166,11 @@ public final class FlipDotTests {
                     var controller = tile.assembly().controller();
                     controller.installMedia(new MediaClip(4, 2, threeFrames()));
                     helper.assertValueEqual(
-                            GameTestKit.reload(helper, controller).mediaFrameCount(), 3, "media frames after loading");
+                            GameTestKit.reload(helper, controller)
+                                    .mediaPlayback()
+                                    .frameCount(),
+                            3,
+                            "media frames after loading");
                 })
                 .thenSucceed();
     }
@@ -310,7 +317,7 @@ public final class FlipDotTests {
                     helper.assertTrue(shown == 2 || shown == 4, "The media didn't play past its first frame");
                 })
                 .thenExecute(() -> {
-                    board.controller().mediaControl("pause");
+                    board.controller().mediaPlayback().control("pause");
                     held[0] = board.tile(3, 1).displayedBits();
                 })
                 .thenExecuteAfter(
@@ -342,7 +349,90 @@ public final class FlipDotTests {
                     helper.assertValueEqual(tile.movingDiscs(0), 0, "discs still moving after power loss");
                     // Text, as a Display Link or name tag writes it, replaces the media.
                     board.text(1, "NEW");
-                    helper.assertValueEqual(board.controller().mediaFrameCount(), 0, "media frames after new text");
+                    helper.assertValueEqual(
+                            board.controller().mediaPlayback().frameCount(), 0, "media frames after new text");
+                })
+                .thenSucceed();
+    }
+
+    /** The clip goes to the media store, loads with the board's playback state, and loses its claim when cleared. */
+    @GameTest(templateNamespace = MOD_ID, template = GameTestKit.EMPTY)
+    public static void storedMediaLoadsAndClearingReleasesIt(GameTestHelper helper) {
+        var board = Board.build(helper, 4, 2, 32);
+        var controller = board.controller();
+        var level = helper.getLevel();
+        controller.installMedia(new MediaClip(4, 2, threeFrames(), "stripes.png"));
+        var playback = controller.mediaPlayback();
+        String id = playback.id();
+        helper.assertTrue(id != null, "The clip wasn't stored");
+        helper.assertTrue(MediaStore.claimed(level, controller.getBlockPos(), id), "The board didn't claim its clip");
+        board.forEachTile(tile -> helper.assertTrue(
+                tile == controller || !tile.mediaPlayback().hasMedia(),
+                "A tile other than the controller holds media"));
+
+        playback.control("loop");
+        playback.control("pause");
+        var loaded = GameTestKit.reload(helper, controller).mediaPlayback();
+        helper.assertValueEqual(loaded.id(), id, "media id after loading");
+        helper.assertValueEqual(loaded.frameCount(), 3, "media frames after loading");
+        helper.assertValueEqual(loaded.filename(), "stripes.png", "media name after loading");
+        helper.assertFalse(loaded.loops(), "Loop came back on after loading");
+        helper.assertFalse(loaded.playbackEnabled(), "Paused media played after loading");
+        byte[] archive = loaded.archive();
+        helper.assertTrue(
+                archive != null && MediaClip.fromArchive(archive).count() == 3,
+                "The editor archive didn't load from the store");
+
+        controller.clearDisplay();
+        helper.assertValueEqual(playback.frameCount(), 0, "media frames after clearing");
+        helper.assertTrue(playback.id() == null, "Cleared media kept its id");
+        helper.assertFalse(MediaStore.claimed(level, controller.getBlockPos(), id), "Cleared media kept its claim");
+        board.forEachTile(tile -> helper.assertValueEqual(tile.pendingBits(), 0L, "queued dots after clearing"));
+
+        controller.installMedia(new MediaClip(4, 2, threeFrames()));
+        String again = playback.id();
+        level.setBlock(controller.getBlockPos(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        helper.assertFalse(MediaStore.claimed(level, controller.getBlockPos(), again), "A broken board kept its claim");
+        helper.succeed();
+    }
+
+    /** A board saved with its clip inline, because the store couldn't write it, moves it to the store when it loads. */
+    @GameTest(templateNamespace = MOD_ID, template = GameTestKit.EMPTY)
+    public static void inlineMediaMovesToTheStore(GameTestHelper helper) {
+        var board = Board.build(helper, 4, 2, 32);
+        var controller = board.controller();
+        controller.installMedia(new MediaClip(4, 2, threeFrames()));
+        var registries = helper.getLevel().registryAccess();
+        var tag = controller.saveWithFullMetadata(registries);
+        String id = tag.getString(MediaPlayback.MEDIA_ID);
+        tag.remove(MediaPlayback.MEDIA_ID);
+        tag.putByteArray("MediaArchive", controller.mediaPlayback().archive());
+        var loaded = BlockEntity.loadStatic(controller.getBlockPos(), controller.getBlockState(), tag, registries);
+        helper.assertTrue(loaded instanceof FlipDotBlockEntity, "The board didn't load");
+        var playback = ((FlipDotBlockEntity) loaded).mediaPlayback();
+        helper.assertValueEqual(playback.id(), id, "media id after moving the inline clip to the store");
+        helper.assertValueEqual(playback.frameCount(), 3, "media frames of the inline clip");
+        helper.succeed();
+    }
+
+    /** Media is made for one board's size, so it plays across lazy ticks, and a board that grows drops it. */
+    @GameTest(templateNamespace = MOD_ID, template = GameTestKit.EMPTY, timeoutTicks = 200)
+    public static void resizedBoardsDropTheirMedia(GameTestHelper helper) {
+        var board = Board.build(helper, 4, 2, 32);
+        var controller = board.controller();
+        controller.installMedia(new MediaClip(4, 2, threeFrames()));
+        String id = controller.mediaPlayback().id();
+        helper.startSequence()
+                .thenExecuteAfter(
+                        45,
+                        () -> helper.assertValueEqual(
+                                controller.mediaPlayback().frameCount(), 3, "media frames on the unchanged board"))
+                .thenExecute(() -> helper.setBlock(board.pos(4, 0), Board.display()))
+                .thenWaitUntil(() -> {
+                    helper.assertValueEqual(controller.mediaPlayback().frameCount(), 0, "media frames after growing");
+                    helper.assertFalse(
+                            MediaStore.claimed(helper.getLevel(), controller.getBlockPos(), id),
+                            "The grown board kept its claim");
                 })
                 .thenSucceed();
     }

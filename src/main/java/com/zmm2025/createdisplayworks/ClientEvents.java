@@ -1,12 +1,9 @@
 package com.zmm2025.createdisplayworks;
 
-import com.zmm2025.createdisplayworks.flipdot.DiscRattle;
 import com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity;
-import com.zmm2025.createdisplayworks.media.MediaNetwork;
 import com.zmm2025.createdisplayworks.media.MediaScreen;
 import com.zmm2025.createdisplayworks.ponder.DisplayWorksPonderPlugin;
 import net.createmod.ponder.foundation.PonderIndex;
-import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModList;
@@ -26,27 +23,10 @@ public final class ClientEvents {
 
     @SubscribeEvent
     public static void setup(FMLClientSetupEvent event) {
-        FlipDotBlockEntity.clientTick = DiscRattle::update;
         ModList.get()
                 .getModContainerById(CreateDisplayWorks.MOD_ID)
                 .ifPresent(mod -> mod.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new));
         PonderIndex.addPlugin(new DisplayWorksPonderPlugin());
-        MediaNetwork.openScreen = data -> Minecraft.getInstance()
-                .setScreen(new MediaScreen(
-                        data.pos(),
-                        data.columns(),
-                        data.rows(),
-                        data.filename(),
-                        data.thumbnail(),
-                        data.frames(),
-                        data.playing(),
-                        data.loop()));
-        MediaNetwork.receiveEditor = data -> {
-            if (Minecraft.getInstance().screen instanceof MediaScreen screen) screen.receiveEditor(data);
-        };
-        MediaNetwork.updateScreen = data -> {
-            if (Minecraft.getInstance().screen instanceof MediaScreen screen) screen.updateStatus(data);
-        };
     }
     // Renderers only see boards they draw, so flips that arrived for hidden boards start here.
     @SubscribeEvent

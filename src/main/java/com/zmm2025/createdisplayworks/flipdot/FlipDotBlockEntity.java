@@ -3,22 +3,18 @@ package com.zmm2025.createdisplayworks.flipdot;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.zmm2025.createdisplayworks.media.MediaClip;
-import com.zmm2025.createdisplayworks.media.MediaLimits;
-import com.zmm2025.createdisplayworks.media.MediaStore;
+import com.zmm2025.createdisplayworks.media.MediaDisplay;
+import com.zmm2025.createdisplayworks.media.MediaPlayback;
 import java.util.*;
-import java.util.function.Consumer;
 import net.createmod.catnip.animation.AnimationTickHolder;
 import net.minecraft.core.*;
 import net.minecraft.nbt.*;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
-public class FlipDotBlockEntity extends KineticBlockEntity {
-    public static Consumer<FlipDotBlockEntity> clientTick = be -> {};
+public class FlipDotBlockEntity extends KineticBlockEntity implements MediaDisplay {
     private static final int BROADCAST_DELAY = 1;
     private boolean clientStartPending;
     /** Client boards whose flip starts on the next frame. */
@@ -32,7 +28,6 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     private boolean paletteSet;
     private final DiscMotion motion = new DiscMotion();
     private boolean restoreClock;
-    private int playbackDelay;
     private long lastTick = Long.MIN_VALUE;
     private boolean wasPowered;
     private int boardWidth, boardHeight;
@@ -45,19 +40,10 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     private boolean hasText, bitmapMode;
     private FlipDotAssembly assembly;
     private long lastAssemblyScan = Long.MIN_VALUE / 2;
-    // Playback frames only. The editable source lives in the saved archive, which is built once and reused for every
-    // save and editor request instead of being rebuilt each time.
-    private MediaClip media;
-    /**
-     * Saved inline only when the store couldn't write {@link #mediaId}'s file. Otherwise the archive, with the editable
-     * source, is read from the store when the media screen asks for it.
-     */
-    private byte[] mediaArchive;
-    /** The {@link MediaStore} id of {@link #media}, or null if it couldn't be stored and has to be saved inline. */
-    private String mediaId;
-
-    private int mediaFrame;
-    private boolean mediaPlaying, mediaLoop = true;
+    /** Only the controller's plays. It shows its frames on the board the controller found last. */
+    private final MediaPlayback playback = new MediaPlayback(this, frame -> {
+        if (assembly != null) queueMediaFrame(assembly, frame);
+    });
 
     public FlipDotBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -118,11 +104,12 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
                 .mapToInt(t -> found.cell(t.worldPosition))
                 .toArray();
         clearIfTurned(found.tiles(), cells);
-        for (FlipDotBlockEntity tile : found.tiles()) if (tile != controller && tile.media != null) tile.clearMedia();
+        for (FlipDotBlockEntity tile : found.tiles())
+            if (tile != controller && tile.playback.hasMedia()) tile.playback.clear();
         int[] members = cells.clone();
         Arrays.sort(members);
         if (controller.memberCells.length > 0 && !Arrays.equals(controller.memberCells, members))
-            controller.clearMedia();
+            controller.playback.clear();
         controller.memberCells = members;
         for (int i = 0; i < cells.length; i++) {
             var tile = found.tiles().get(i);
@@ -131,7 +118,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         if (controller.boardWidth != 0
                 && (controller.boardWidth != found.width() || controller.boardHeight != found.height()))
-            controller.clearMedia();
+            controller.playback.clear();
         controller.boardWidth = found.width();
         controller.boardHeight = found.height();
         found.controller().lastAssemblyScan = level.getGameTime();
@@ -146,7 +133,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         for (int i = 0; i < previous.length; i++)
             if (previous[i] == BoardCells.ORIGIN && BoardCells.turned(previous, cells, tiles.get(i).memberCells)) {
                 for (var tile : tiles) {
-                    tile.clearMedia();
+                    tile.playback.clear();
                     tile.hasText = false;
                     tile.rowText = "";
                     tile.bitmapMode = false;
@@ -193,7 +180,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
 
     public void setLine(FlipDotAssembly group, int row, String text) {
         if (row < 0 || row >= group.height()) return;
-        group.controller().clearMedia();
+        group.controller().playback.clear();
         String bounded = text.codePoints()
                 .limit(256)
                 .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
@@ -214,7 +201,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         FlipDotAssembly group = assembly();
         if (group == null || columns != group.width() || rows != group.height() || masks.length != columns * rows)
             return false;
-        group.controller().clearMedia();
+        group.controller().playback.clear();
         for (FlipDotBlockEntity tile : group.tiles()) {
             tile.assembly = group;
             tile.bitmapMode = true;
@@ -226,115 +213,60 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         return true;
     }
 
-    public void installMedia(MediaClip clip) {
-        installMedia(clip, null);
+    @Override
+    public Canvas mediaCanvas() {
+        var group = assembly();
+        return group == null ? null : mediaCanvas(group);
     }
-    /** {@code archive}, when given, must be {@code clip}'s archive; it's reused if the source needs no shrinking. */
+
+    Canvas mediaCanvas(FlipDotAssembly group) {
+        return new Canvas(group.width(), group.height(), group.controller().playback);
+    }
+
+    @Override
+    public MediaPlayback mediaPlayback() {
+        return playback;
+    }
+
+    @Override
     public void installMedia(MediaClip clip, byte[] archive) {
         var group = assembly();
         if (group == null || group.width() != clip.columns() || group.height() != clip.rows()) return;
         for (var tile : group.tiles()) {
-            tile.clearMedia();
+            tile.playback.clear();
             tile.assembly = group;
         }
-        storeMedia(clip, archive);
-        claimMedia();
-        mediaFrame = 0;
-        mediaPlaying = clip.count() > 1;
-        mediaLoop = true;
-        playbackDelay = 0;
-        // A still image is an ordinary latest target, including while unpowered.
-        queueMediaFrame(group, media.frame(0));
-        setChanged();
+        group.controller().playback.install(clip, archive);
     }
 
-    private void claimMedia() {
-        if (mediaId != null && level instanceof ServerLevel server) MediaStore.claim(server, worldPosition, mediaId);
+    @Override
+    public void clearDisplay() {
+        var group = assembly();
+        if (group == null) return;
+        group.controller().playback.clear();
+        for (int row = 0; row < group.height(); row++) group.controller().setLine(group, row, "");
     }
 
-    private void releaseMedia() {
-        if (mediaId != null && level instanceof ServerLevel server) MediaStore.release(server, worldPosition, mediaId);
+    @Override
+    public int litColor() {
+        return discColor();
     }
-    // Boards loaded from disk get their level after reading their data, and copies made with /clone read it afterwards.
+
+    @Override
+    public int unlitColor() {
+        return backColor();
+    }
+
     @Override
     public void setLevel(Level level) {
         super.setLevel(level);
-        claimMedia();
+        playback.claim();
     }
 
     @Override
     public void destroy() {
         super.destroy();
-        releaseMedia();
-    }
-
-    public boolean isMediaPlaying() {
-        return media != null && mediaPlaying && wasPowered;
-    }
-
-    public void clearMedia() {
-        MediaLimits.release(this);
-        releaseMedia();
-        media = null;
-        mediaId = null;
-        mediaArchive = null;
-        mediaFrame = 0;
-        mediaPlaying = false;
-        setChanged();
-    }
-    /** Stores the clip with its editable source shrunk to what this board can show, and keeps only playback in memory. */
-    private void storeMedia(MediaClip clip, byte[] archive) {
-        var compact = clip.withCompactSource();
-        byte[] bytes = compact == clip && archive != null ? archive : compact.archive();
-        media = compact.withoutSource();
-        mediaId = MediaStore.save(level.getServer(), bytes);
-        mediaArchive = mediaId == null ? bytes : null;
-    }
-
-    public void mediaControl(String action) {
-        switch (action) {
-            case "play" -> mediaPlaying = true;
-            case "pause" -> mediaPlaying = false;
-            case "restart" -> {
-                mediaFrame = 0;
-                playbackDelay = 0;
-                mediaPlaying = true;
-            }
-            case "loop" -> mediaLoop = !mediaLoop;
-            default -> {
-                return;
-            }
-        }
-        setChanged();
-        sendData();
-    }
-    /** The saved archive, with the editable source, for the media screen. */
-    public byte[] mediaArchive() {
-        return mediaId != null ? MediaStore.read(mediaId) : mediaArchive;
-    }
-
-    public String mediaId() {
-        return mediaId;
-    }
-
-    public String mediaFilename() {
-        return media == null ? "" : media.filename();
-    }
-
-    public long[] mediaThumbnail() {
-        return media == null ? new long[0] : media.frame(0);
-    }
-
-    public int mediaFrameCount() {
-        return media == null ? 0 : media.count();
-    }
-
-    public boolean mediaPlaybackEnabled() {
-        return mediaPlaying;
-    }
-
-    public boolean mediaLoops() {
-        return mediaLoop;
+        playback.release();
     }
 
     private void queueMediaFrame(FlipDotAssembly group, long[] frame) {
@@ -357,7 +289,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
             restoreClock = false;
         }
         if (level.isClientSide) {
-            if (soundController) clientTick.accept(this);
+            // Only clients run this, so dedicated servers never load the sound classes DiscRattle uses.
+            if (soundController) DiscRattle.update(this);
             return;
         }
         // Tick gaps are unloaded time, not animation time.
@@ -382,30 +315,14 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         if (!powered) {
             wasPowered = false;
-            playbackDelay = 0;
-            MediaLimits.release(this);
+            playback.hold();
             return;
         }
         // If power returns before the old flip settles, finish it before advancing video.
         boolean settling = !wasPowered && assembly.tiles().stream().anyMatch(t -> t.motion.moving(now) > 0);
         if (settling) return;
         wasPowered = true;
-        if (media != null
-                && mediaPlaying
-                && MediaLimits.acquire(this, assembly.tiles().size())
-                && playbackDelay-- <= 0) {
-            if (media.columns() != assembly.width() || media.rows() != assembly.height()) {
-                clearMedia();
-                return;
-            }
-            queueMediaFrame(assembly, media.frame(mediaFrame));
-            if (++mediaFrame >= media.count()) {
-                mediaFrame = 0;
-                if (!mediaLoop) mediaPlaying = false;
-            }
-            playbackDelay = 20 / MediaClip.FPS - 1;
-            setChanged();
-        }
+        if (!playback.tick(assembly.width(), assembly.height(), assembly.tiles().size())) return;
         for (var tile : assembly.tiles()) {
             if (tile.displayed == tile.pending && tile.motion.speed() == rpm) continue;
             tile.displayed = tile.pending;
@@ -549,20 +466,13 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         tag.putFloat("MotionRPM", motion.speed());
         tag.putDouble("MotionTime", clientPacket ? motion.anchor() : 0);
         if (clientPacket) tag.putDouble("SentTime", time);
-        tag.putInt("PlaybackDelay", playbackDelay);
+        playback.write(tag, clientPacket);
         tag.putBoolean("WasPowered", wasPowered);
         if (boardCell != BoardCells.NONE) tag.putInt("BoardCell", boardCell);
         tag.putIntArray("MemberCells", memberCells);
         tag.putString("RowText", rowText);
         tag.putBoolean("HasText", hasText);
         tag.putBoolean("BitmapMode", bitmapMode);
-        if (!clientPacket && media != null) {
-            if (mediaId != null) tag.putString("MediaId", mediaId);
-            else tag.putByteArray("MediaArchive", mediaArchive);
-            tag.putInt("MediaFrame", mediaFrame);
-            tag.putBoolean("MediaPlaying", mediaPlaying);
-            tag.putBoolean("MediaLoop", mediaLoop);
-        }
     }
 
     @Override
@@ -593,36 +503,10 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
                 || Arrays.stream(memberCells).anyMatch(c -> !BoardCells.valid(c))) memberCells = new int[0];
         restoreClock = !clientPacket;
         wasPowered = tag.getBoolean("WasPowered");
-        playbackDelay = Math.clamp(tag.getInt("PlaybackDelay"), 0, 20 / MediaClip.FPS);
+        playback.read(tag, clientPacket);
         String text = tag.getString("RowText");
         rowText = text.substring(0, Math.min(512, text.length()));
         hasText = tag.getBoolean("HasText");
         bitmapMode = tag.getBoolean("BitmapMode");
-        if (!clientPacket) {
-            media = null;
-            mediaId = null;
-            mediaArchive = null;
-            // A board whose clip couldn't be stored keeps it inline, and moves it to the store once it can.
-            if (tag.contains("MediaId")) {
-                mediaId = tag.getString("MediaId");
-                var clip = MediaStore.load(mediaId);
-                if (clip == null) mediaId = null;
-                else media = clip.withoutSource();
-            } else if (tag.contains("MediaArchive"))
-                try {
-                    byte[] archive = tag.getByteArray("MediaArchive");
-                    media = MediaClip.fromArchive(archive).withoutSource();
-                    var server = ServerLifecycleHooks.getCurrentServer();
-                    if (server != null) mediaId = MediaStore.save(server, archive);
-                    if (mediaId == null) mediaArchive = archive;
-                } catch (IllegalArgumentException ignored) {
-                }
-            claimMedia();
-            if (media != null) {
-                mediaFrame = Math.floorMod(tag.getInt("MediaFrame"), media.count());
-                mediaPlaying = tag.getBoolean("MediaPlaying");
-                mediaLoop = tag.getBoolean("MediaLoop");
-            } else mediaPlaying = false;
-        }
     }
 }

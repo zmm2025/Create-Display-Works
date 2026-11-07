@@ -10,6 +10,18 @@ import java.util.Arrays;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
+/**
+ * Media as a display plays it: {@code columns} × {@code rows} tiles of 8×8 pixels, and their frames at {@link #FPS}.
+ * <p>
+ * <b>Pixel format.</b> This is where the format is decided, and there's one: each tile of a frame is one {@code long}
+ * whose bit {@code y * 8 + x} sets pixel {@code (x, y)}, tiles row-major, frames one after another.
+ * {@link Monochrome} makes these masks from the gray levels {@link EditableMedia} keeps, and the media screen previews
+ * them. A color display, such as an RGB matrix, would add its format here: a format id in the {@link #archive} header
+ * next to its version, frames held in that format, a converter beside {@link Monochrome} (with an editable source
+ * that keeps color), and the format a display takes in {@link MediaDisplay.Canvas}, which {@link MediaNetwork} checks
+ * before installing like it checks the size. {@link MediaStore}, {@link MediaLimits} and the upload and editor
+ * transfers only move archives and count blocks, so they need no change.
+ */
 public record MediaClip(
         int columns, int rows, long[] frames, String filename, EditableMedia editable, MediaSettings settings) {
     public MediaClip(int columns, int rows, long[] frames, String filename) {

@@ -10,7 +10,6 @@ import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 import com.simibubi.create.foundation.block.IBE;
 import com.zmm2025.createdisplayworks.ModBlockEntities;
 import com.zmm2025.createdisplayworks.ModBlocks;
-import com.zmm2025.createdisplayworks.media.MediaClip;
 import com.zmm2025.createdisplayworks.media.MediaNetwork;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -282,13 +281,8 @@ public class FlipDotBlock extends HorizontalKineticBlock
         if (!level.isClientSide && player instanceof ServerPlayer serverPlayer)
             withBlockEntityDo(level, pos, be -> {
                 var group = be.assembly();
-                if (protectedFrom(player, level, group)) return;
-                if (group != null && group.width() * group.height() > MediaClip.MAX_TILES) {
-                    player.displayClientMessage(
-                            Component.translatable("message.create_display_works.media_canvas_limit"), true);
-                    return;
-                }
-                if (group != null) MediaNetwork.open(serverPlayer, pos, group);
+                if (group != null && !protectedFrom(player, level, group))
+                    MediaNetwork.open(serverPlayer, pos, be.mediaCanvas(group));
             });
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
