@@ -31,7 +31,7 @@ final class DevOptions {
                 Map<String, String> before = read(file);
                 if (Boolean.parseBoolean(query.get("restore"))) {
                     if (!Files.exists(backup))
-                        return DevTools.failure(
+                        return DevApi.failure(
                                 "There's nothing to restore: no setting has changed since the last restore.");
                     Files.move(backup, file, StandardCopyOption.REPLACE_EXISTING);
                     return apply(minecraft, before, read(file));
@@ -43,7 +43,7 @@ final class DevOptions {
                         .filter(name -> !before.containsKey(name))
                         .toList();
                 if (!unknown.isEmpty())
-                    return DevTools.failure(
+                    return DevApi.failure(
                             "Unknown settings: " + String.join(", ", unknown) + ". GET /options lists them.");
                 if (!Files.exists(backup)) Files.copy(file, backup);
                 Map<String, String> after = new LinkedHashMap<>(before);
@@ -51,7 +51,7 @@ final class DevOptions {
                 write(file, after);
                 return apply(minecraft, before, after);
             } catch (IOException e) {
-                return DevTools.failure(e.toString());
+                return DevApi.failure(e.toString());
             }
         });
     }
@@ -75,7 +75,7 @@ final class DevOptions {
         boolean packs = changed.contains("resourcePacks") || changed.contains("incompatibleResourcePacks");
         if (packs) options.loadSelectedResourcePacks(minecraft.getResourcePackRepository());
         if (packs || changed.contains("lang")) minecraft.reloadResourcePacks();
-        JsonObject response = DevTools.ok(), changes = new JsonObject();
+        JsonObject response = DevApi.ok(), changes = new JsonObject();
         changed.forEach(name -> {
             JsonObject change = new JsonObject();
             change.addProperty("before", before.get(name));
@@ -87,7 +87,7 @@ final class DevOptions {
     }
 
     private static JsonObject list(Map<String, String> options, String filter) {
-        JsonObject response = DevTools.ok(), values = new JsonObject();
+        JsonObject response = DevApi.ok(), values = new JsonObject();
         String wanted = filter == null ? "" : filter.toLowerCase(Locale.ROOT);
         options.forEach((name, value) -> {
             if (name.toLowerCase(Locale.ROOT).contains(wanted)) values.addProperty(name, value);

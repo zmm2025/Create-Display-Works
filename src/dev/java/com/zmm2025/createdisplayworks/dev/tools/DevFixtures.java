@@ -12,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
@@ -36,10 +35,10 @@ final class DevFixtures {
 
     static JsonObject fixture(Map<String, String> query) throws Exception {
         String name = query.get("name");
-        if (!NAMES.contains(name)) return DevTools.failure("Use name=" + String.join(", ", NAMES) + ".");
+        if (!NAMES.contains(name)) return DevApi.failure("Use name=" + String.join(", ", NAMES) + ".");
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
-        if (server == null || minecraft.player == null) return DevTools.failure("Fixtures need a single-player world.");
+        if (server == null || minecraft.player == null) return DevApi.failure("Fixtures need a single-player world.");
         JsonObject recipe = recipe(name);
         boolean placed = query.containsKey("x");
         int x = placed ? Integer.parseInt(query.get("x")) : nextSpot(server);
@@ -48,11 +47,10 @@ final class DevFixtures {
         JsonObject arrived = DevTools.command("[\"tp @s " + x + " 80 " + z + "\",{\"waitUntil\":\"execute if loaded "
                 + x + " 0 " + z + "\",\"timeoutTicks\":400}]");
         if (!arrived.get("ok").getAsBoolean()) return arrived;
-        var dimension = minecraft.player.level().dimension();
         int y = query.containsKey("y")
                 ? Integer.parseInt(query.get("y"))
-                : server.submit(() -> server.getLevel(dimension).getHeight(Heightmap.Types.MOTION_BLOCKING, x, z))
-                        .get(1, TimeUnit.MINUTES);
+                : DevTools.onServer(
+                        (s, player) -> player.serverLevel().getHeight(Heightmap.Types.MOTION_BLOCKING, x, z));
 
         JsonObject batch = DevTools.command(place(recipe.get("steps"), x, y, z).toString());
         JsonObject response = new JsonObject();

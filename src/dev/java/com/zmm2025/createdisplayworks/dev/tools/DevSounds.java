@@ -72,12 +72,10 @@ final class DevSounds {
                             minecraft.getSoundManager().getListenerTransform().position();
                     JsonObject response = new JsonObject();
                     response.addProperty("ok", true);
-                    response.addProperty(
-                            "listener",
-                            DevTools.round(ear.x) + " " + DevTools.round(ear.y) + " " + DevTools.round(ear.z));
+                    response.addProperty("listener", DevApi.position(ear));
                     response.addProperty("masterVolume", minecraft.options.getSoundSourceVolume(SoundSource.MASTER));
                     // What the sound engine actually plays at.
-                    response.addProperty("outputGain", DevTools.round(AL10.alGetListenerf(AL10.AL_GAIN)));
+                    response.addProperty("outputGain", DevApi.round(AL10.alGetListenerf(AL10.AL_GAIN)));
                     // A hidden game's sound goes into memory, so it can't reach the speakers.
                     response.addProperty("silentDevice", DevAudio.active());
 
@@ -103,12 +101,9 @@ final class DevSounds {
                             json.addProperty("source", sound.source);
                             json.addProperty("volume", sound.volume);
                             json.addProperty("pitch", sound.pitch);
-                            json.addProperty(
-                                    "pos",
-                                    DevTools.round(sound.x) + " " + DevTools.round(sound.y) + " "
-                                            + DevTools.round(sound.z));
-                            json.addProperty(
-                                    "distance", DevTools.round(ear.distanceTo(new Vec3(sound.x, sound.y, sound.z))));
+                            Vec3 pos = new Vec3(sound.x, sound.y, sound.z);
+                            json.addProperty("pos", DevApi.position(pos));
+                            json.addProperty("distance", DevApi.round(ear.distanceTo(pos)));
                             json.addProperty("range", Float.isInfinite(sound.range) ? -1 : sound.range);
                             json.addProperty("instance", sound.instance);
                             started.add(json);
@@ -137,9 +132,9 @@ final class DevSounds {
         json.addProperty("volume", volume);
         json.addProperty("pitch", sound.getPitch());
         Vec3 pos = new Vec3(sound.getX(), sound.getY(), sound.getZ());
-        json.addProperty("pos", DevTools.round(pos.x) + " " + DevTools.round(pos.y) + " " + DevTools.round(pos.z));
+        json.addProperty("pos", DevApi.position(pos));
         double distance = sound.isRelative() ? pos.length() : ear.distanceTo(pos);
-        json.addProperty("distance", DevTools.round(distance));
+        json.addProperty("distance", DevApi.round(distance));
         Sound resolved = sound.getSound();
         if (sound.getAttenuation() == SoundInstance.Attenuation.LINEAR && resolved != null) {
             float range = Math.max(volume, 1) * resolved.getAttenuationDistance();

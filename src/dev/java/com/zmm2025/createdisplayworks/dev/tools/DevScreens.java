@@ -37,7 +37,7 @@ final class DevScreens {
     static JsonObject screen() throws Exception {
         return DevTools.onClient(() -> {
             Screen screen = Minecraft.getInstance().screen;
-            JsonObject response = DevTools.ok();
+            JsonObject response = DevApi.ok();
             if (screen == null) return response;
             response.addProperty("screen", screen.getClass().getName());
             response.addProperty("title", screen.getTitle().getString());
@@ -74,7 +74,7 @@ final class DevScreens {
     static JsonObject close() throws Exception {
         return DevTools.onClient(() -> {
             Screen screen = Minecraft.getInstance().screen;
-            JsonObject response = DevTools.ok();
+            JsonObject response = DevApi.ok();
             response.addProperty("closed", screen != null);
             if (screen != null) screen.onClose();
             return response;
@@ -121,7 +121,7 @@ final class DevScreens {
             JsonArray chat = new JsonArray();
             for (int i = Math.min(lines, messages.size()) - 1; i >= 0; i--)
                 chat.add(messages.get(i).content().getString());
-            JsonObject response = DevTools.ok();
+            JsonObject response = DevApi.ok();
             response.add("chat", chat);
             GuiAccessor gui = (GuiAccessor) Minecraft.getInstance().gui;
             if (gui.createDisplayWorksDev$getOverlayMessageTime() > 0
@@ -167,7 +167,7 @@ final class DevScreens {
         int limit = Integer.parseInt(query.getOrDefault("limit", "50"));
         return DevTools.onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
-            if (minecraft.player == null) return DevTools.failure("Not in a world.");
+            if (minecraft.player == null) return DevApi.failure("Not in a world.");
             List<Entity> near = new ArrayList<>(minecraft.level.getEntities(
                     minecraft.player, minecraft.player.getBoundingBox().inflate(radius)));
             near.removeIf(entity -> type != null
@@ -184,17 +184,14 @@ final class DevScreens {
                         "type",
                         BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
                 json.addProperty("name", entity.getName().getString());
-                json.addProperty(
-                        "pos",
-                        DevTools.round(entity.getX()) + " " + DevTools.round(entity.getY()) + " "
-                                + DevTools.round(entity.getZ()));
+                json.addProperty("pos", DevApi.position(entity.position()));
                 if (entity.getVehicle() != null)
                     json.addProperty("vehicle", entity.getVehicle().getId());
                 if (entity instanceof CarriageContraptionEntity carriage && carriage.trainId != null)
                     json.addProperty("train", carriage.trainId.toString());
                 list.add(json);
             });
-            JsonObject response = DevTools.ok();
+            JsonObject response = DevApi.ok();
             response.addProperty("count", near.size());
             response.add("entities", list);
             return response;

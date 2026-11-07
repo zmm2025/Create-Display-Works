@@ -3,14 +3,11 @@ package com.zmm2025.createdisplayworks.dev.tools;
 import com.google.gson.JsonObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
@@ -39,8 +36,6 @@ public final class DevAudio {
     private static volatile Thread renderer;
     /** Guarded by {@link #LOCK}. Null unless recording. */
     private static ByteArrayOutputStream recording;
-    /** Guarded by {@link #LOCK}. Null unless a session is being recorded. */
-    private static OutputStream session;
 
     private static volatile long recordingStarted;
 
@@ -126,33 +121,9 @@ public final class DevAudio {
             SOFTLoopback.alcRenderSamplesSOFT(handle, buffer, frames);
             rendered += frames;
             synchronized (LOCK) {
-                boolean record = recording != null && recording.size() < MAX_BYTES;
-                if (!record && session == null) continue;
+                if (recording == null || recording.size() >= MAX_BYTES) continue;
                 buffer.get(0, copy, 0, frames * BYTES_PER_FRAME);
-                if (record) recording.write(copy, 0, frames * BYTES_PER_FRAME);
-                if (session != null) writeSession(copy, frames * BYTES_PER_FRAME);
-            }
-        }
-    }
-
-    private static void writeSession(byte[] samples, int length) {
-        try {
-            session.write(samples, 0, length);
-        } catch (IOException e) {
-            LOGGER.warn("Stopped recording the session's sound", e);
-            session = null;
-        }
-    }
-
-    /** Sends the mix to {@code file} as well, for a session recording; null stops. */
-    static void tap(Path file) {
-        synchronized (LOCK) {
-            try {
-                if (session != null) session.close();
-                session = file == null ? null : Files.newOutputStream(file);
-            } catch (IOException e) {
-                LOGGER.warn("Could not record the session's sound", e);
-                session = null;
+                recording.write(copy, 0, frames * BYTES_PER_FRAME);
             }
         }
     }
@@ -172,18 +143,18 @@ public final class DevAudio {
         String action = query.get("action");
         if ("start".equals(action)) {
             start();
-            return DevTools.ok();
+            return DevApi.ok();
         }
         if (!"stop".equals(action)) {
             double seconds = Double.parseDouble(query.getOrDefault("seconds", "5"));
             if (seconds <= 0 || seconds > MAX_SECONDS)
-                return DevTools.failure("Record for up to " + MAX_SECONDS + " seconds.");
+                return DevApi.failure("Record for up to " + MAX_SECONDS + " seconds.");
             start();
             Thread.sleep((long) (seconds * 1000));
         }
         Path file = stop();
-        if (file == null) return DevTools.failure("Nothing is being recorded.");
-        JsonObject response = DevTools.ok();
+        if (file == null) return DevApi.failure("Nothing is being recorded.");
+        JsonObject response = DevApi.ok();
         response.addProperty("path", file.toString());
         describe(file, response);
         if (query.containsKey("keep")) DevTools.keep(query.get("keep"), List.of(DevVideo.compress(file)), response);
@@ -211,15 +182,8 @@ public final class DevAudio {
             samples = recording.toByteArray();
             recording = null;
         }
-        Path folder = Minecraft.getInstance()
-                .gameDirectory
-                .toPath()
-                .resolve("screenshots/dev-tools")
-                .toAbsolutePath()
-                .normalize();
-        Files.createDirectories(folder);
-        Path file = folder.resolve(
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS")) + ".wav");
+        Path file = DevTools.scratchFile(".wav");
+        Files.createDirectories(file.getParent());
         ByteBuffer header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
         header.put("RIFF".getBytes())
                 .putInt(36 + samples.length)
@@ -252,9 +216,9 @@ public final class DevAudio {
             sum += (double) sample * sample;
         }
         double peakDb = decibels(peak), rmsDb = count == 0 ? -120 : decibels(Math.sqrt(sum / count));
-        response.addProperty("seconds", DevTools.round((double) count / CHANNELS / RATE));
-        response.addProperty("peakDb", DevTools.round(peakDb));
-        response.addProperty("rmsDb", DevTools.round(rmsDb));
+        response.addProperty("seconds", DevApi.round((double) count / CHANNELS / RATE));
+        response.addProperty("peakDb", DevApi.round(peakDb));
+        response.addProperty("rmsDb", DevApi.round(rmsDb));
         response.addProperty("silent", peakDb < SILENCE_DB);
     }
 

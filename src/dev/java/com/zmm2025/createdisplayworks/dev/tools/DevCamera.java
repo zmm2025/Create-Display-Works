@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Direction;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 
@@ -23,16 +22,13 @@ final class DevCamera {
      */
     static JsonObject camera(Map<String, String> query) throws Exception {
         Minecraft minecraft = Minecraft.getInstance();
-        MinecraftServer server = minecraft.getSingleplayerServer();
-        if (server == null || minecraft.player == null)
-            return DevTools.failure("Not in a single-player world; on a server, use /command and /look.");
-        if (!query.containsKey("x") || !query.containsKey("y") || !query.containsKey("z"))
-            return DevTools.failure("Pass x, y and z.");
-        Vec3 target = new Vec3(coordinate(query.get("x")), coordinate(query.get("y")), coordinate(query.get("z")));
+        if (minecraft.getSingleplayerServer() == null || minecraft.player == null)
+            return DevApi.failure("Not in a single-player world; on a server, use /command and /look.");
+        Vec3 target = DevApi.point(query);
         Direction face;
         if (query.containsKey("face")) {
             face = Direction.byName(query.get("face"));
-            if (face == null) return DevTools.failure("Unknown face; use up, down, north, south, east or west.");
+            if (face == null) return DevApi.failure("Unknown face; use up, down, north, south, east or west.");
         } else {
             Vec3 offset = minecraft.player.position().subtract(target);
             face = Direction.getNearest(offset.x, 0, offset.z);
@@ -49,14 +45,11 @@ final class DevCamera {
         float pitch = (float) -Math.toDegrees(Math.atan2(look.y, Math.sqrt(look.x * look.x + look.z * look.z)));
         Vec3 feet = eye.subtract(0, minecraft.player.getEyeHeight(), 0);
 
-        var dimension = minecraft.player.level().dimension();
-        var id = minecraft.player.getUUID();
-        server.submit(() -> {
-                    ServerPlayer player = server.getPlayerList().getPlayer(id);
-                    keepFlying(player);
-                    player.teleportTo(server.getLevel(dimension), feet.x, feet.y, feet.z, yaw, pitch);
-                })
-                .get(1, TimeUnit.MINUTES);
+        DevTools.onServer((server, player) -> {
+            keepFlying(player);
+            player.teleportTo(player.serverLevel(), feet.x, feet.y, feet.z, yaw, pitch);
+            return null;
+        });
         // Wait for the client to apply the teleport, so a screenshot taken next shows the new view.
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (System.nanoTime() < deadline
@@ -66,12 +59,12 @@ final class DevCamera {
 
         JsonObject response = query.containsKey("screenshot") && !"false".equals(query.get("screenshot"))
                 ? DevTools.screenshot(!"false".equals(query.get("hud")), 1, 0, null, query.get("keep"), false)
-                : DevTools.ok();
+                : DevApi.ok();
         response.addProperty("face", face.getName());
-        response.addProperty("distance", DevTools.round(distance));
-        response.addProperty("eye", DevTools.round(eye.x) + " " + DevTools.round(eye.y) + " " + DevTools.round(eye.z));
-        response.addProperty("yaw", DevTools.round(yaw));
-        response.addProperty("pitch", DevTools.round(pitch));
+        response.addProperty("distance", DevApi.round(distance));
+        response.addProperty("eye", DevApi.position(eye));
+        response.addProperty("yaw", DevApi.round(yaw));
+        response.addProperty("pitch", DevApi.round(pitch));
         return response;
     }
 
@@ -92,10 +85,5 @@ final class DevCamera {
         double horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
         double distance = Math.max(width / 2 / Math.tan(horizontalFov / 2), height / 2 / Math.tan(verticalFov / 2));
         return distance * 1.1;
-    }
-
-    private static double coordinate(String text) {
-        double value = Double.parseDouble(text);
-        return text.contains(".") ? value : value + 0.5;
     }
 }

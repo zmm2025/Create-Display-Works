@@ -1,113 +1,32 @@
 package com.zmm2025.createdisplayworks.dev.tools;
 
 import com.google.gson.JsonObject;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.Executors;
 import net.minecraft.client.Minecraft;
 
 /** Localhost-only HTTP API for driving the dev client. Requests run one at a time. Endpoints are listed in DEVELOPMENT.md. */
 final class DevControlServer {
-    private static final String UNKNOWN = "Unknown endpoint; see DEVELOPMENT.md.";
-
     private DevControlServer() {}
 
     /** Starts the API on {@code port}, or on a free port for 0, and returns the port it listens on. */
     static int start(int port) throws IOException {
-        HttpServer server =
-                HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), port), 0);
-        server.setExecutor(Executors.newSingleThreadExecutor(task -> {
-            Thread thread = new Thread(task, "Display Works Dev Control");
-            thread.setDaemon(true);
-            return thread;
-        }));
-        server.createContext("/", DevControlServer::handle);
-        server.start();
-        return server.getAddress().getPort();
-    }
-
-    /**
-     * Whether a request comes from a local tool such as curl or Gradle, rather than from a web page. Browsers send an
-     * {@code Origin} header with every POST, and a page that rebinds its own domain to 127.0.0.1 still sends its own
-     * name as the {@code Host}. Without this check, any open web page could run commands in the game.
-     */
-    static boolean fromLocalTool(HttpExchange exchange) {
-        if (exchange.getRequestHeaders().containsKey("Origin")) return false;
-        String host = exchange.getRequestHeaders().getFirst("Host");
-        if (host == null) return true;
-        String name = host.startsWith("[") ? host.substring(0, host.indexOf(']') + 1) : host.split(":", 2)[0];
-        return name.equals("127.0.0.1") || name.equalsIgnoreCase("localhost") || name.equals("[::1]");
-    }
-
-    /** Answers a request that didn't come from a local tool. */
-    static void refuse(HttpExchange exchange) throws IOException {
-        send(exchange, 403, DevTools.failure("Only local tools may use this API, not web pages."));
-    }
-
-    private static void handle(HttpExchange exchange) throws IOException {
-        if (!fromLocalTool(exchange)) {
-            refuse(exchange);
-            return;
-        }
-        JsonObject response;
-        int code = 200;
-        DevInstance.touch();
-        try {
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            response = dispatch(
-                    exchange.getRequestURI().getPath(),
-                    query(exchange.getRequestURI().getRawQuery()),
-                    body);
-            if (response == null) {
-                code = 404;
-                response = DevTools.failure(UNKNOWN);
-            }
-        } catch (Exception e) {
-            code = 500;
-            response = DevTools.failure(e.toString());
-        }
-        send(exchange, code, response);
-    }
-
-    static void send(HttpExchange exchange, int code, JsonObject response) throws IOException {
-        byte[] bytes = response.toString().getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-        exchange.sendResponseHeaders(code, bytes.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(bytes);
-        }
+        return DevApi.serve(port, "Display Works Dev Control", (path, query, body) -> {
+                    DevInstance.touch();
+                    return run(path, query, body);
+                })
+                .getAddress()
+                .getPort();
     }
 
     /** Runs an endpoint from a batch step, given its path and query the way a request gives them. */
     static JsonObject call(String target, String body) throws Exception {
         int split = target.indexOf('?');
-        JsonObject response = dispatch(
+        JsonObject response = run(
                 split < 0 ? target : target.substring(0, split),
-                query(split < 0 ? null : target.substring(split + 1)),
+                DevApi.query(split < 0 ? null : target.substring(split + 1)),
                 body);
-        return response == null ? DevTools.failure(UNKNOWN) : response;
-    }
-
-    private static JsonObject dispatch(String path, Map<String, String> query, String body) throws Exception {
-        long start = System.nanoTime();
-        try {
-            return run(path, query, body);
-        } finally {
-            if (!path.equals("/status") && !path.equals("/command"))
-                DevRecorder.log(
-                        path
-                                + (query.isEmpty() ? "" : " " + query)
-                                + (body.isBlank() ? "" : " " + body.substring(0, Math.min(body.length(), 80))),
-                        (System.nanoTime() - start) / 1_000_000);
-        }
+        return response == null ? DevApi.failure(DevApi.UNKNOWN) : response;
     }
 
     private static JsonObject run(String path, Map<String, String> query, String body) throws Exception {
@@ -155,7 +74,7 @@ final class DevControlServer {
             case "/player" -> {
                 var server = Minecraft.getInstance().getSingleplayerServer();
                 yield server == null
-                        ? DevTools.failure(
+                        ? DevApi.failure(
                                 "Not in a single-player world; a dedicated server's console API has /player too.")
                         : DevPlayers.player(server, query);
             }
@@ -164,17 +83,5 @@ final class DevControlServer {
             case "/disconnect" -> DevWorld.disconnect();
             default -> null;
         };
-    }
-
-    private static Map<String, String> query(String raw) {
-        Map<String, String> query = new LinkedHashMap<>();
-        if (raw == null) return query;
-        for (String pair : raw.split("&")) {
-            int split = pair.indexOf('=');
-            String key = split < 0 ? pair : pair.substring(0, split),
-                    value = split < 0 ? "" : pair.substring(split + 1);
-            query.put(URLDecoder.decode(key, StandardCharsets.UTF_8), URLDecoder.decode(value, StandardCharsets.UTF_8));
-        }
-        return query;
     }
 }

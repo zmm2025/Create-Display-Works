@@ -83,8 +83,7 @@ final class DevPlayers {
      */
     static JsonObject player(MinecraftServer server, Map<String, String> query) throws Exception {
         return server.submit(() -> {
-                    JsonObject response = new JsonObject();
-                    response.addProperty("ok", true);
+                    JsonObject response = DevApi.ok();
                     String name = query.get("name");
                     if (name == null) {
                         JsonArray players = new JsonArray();
@@ -112,10 +111,7 @@ final class DevPlayers {
                     if (query.containsKey("command"))
                         response.add("command", run(server, player.createCommandSourceStack(), query.get("command")));
                     if (query.containsKey("x")) {
-                        BlockPos pos = new BlockPos(
-                                Integer.parseInt(query.get("x")),
-                                Integer.parseInt(query.get("y")),
-                                Integer.parseInt(query.get("z")));
+                        BlockPos pos = DevApi.blockPos(query);
                         Direction face = Direction.byName(query.getOrDefault("face", "up"));
                         var hit = new BlockHitResult(
                                 Vec3.atCenterOf(pos)
@@ -135,10 +131,7 @@ final class DevPlayers {
                                                 hit)
                                         .toString());
                     }
-                    response.addProperty(
-                            "pos",
-                            DevPlayers.round(player.getX()) + " " + DevPlayers.round(player.getY()) + " "
-                                    + DevPlayers.round(player.getZ()));
+                    response.addProperty("pos", DevApi.position(player.position()));
                     return response;
                 })
                 .get(1, TimeUnit.MINUTES);
@@ -154,9 +147,5 @@ final class DevPlayers {
         NetworkRegistry.configureMockConnection(connection);
         server.getPlayerList().placeNewPlayer(connection, player, cookie);
         return player;
-    }
-
-    private static double round(double value) {
-        return Math.round(value * 100) / 100.0;
     }
 }

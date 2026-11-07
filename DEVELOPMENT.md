@@ -61,10 +61,9 @@ worktree's game stay in that worktree, and later changes to the main world don't
 delete `run/worktrees/<worktree>/saves` while that game is closed. Several worktrees' games can run at once.
 
 When a worktree is removed, for example when T3 Code cleans up an archived thread, its game notices within a few
-seconds and quits. A small helper process then deletes the game's folder and anything the removal left behind
-because the game had it open (on Windows, `git worktree remove` stops partway in that case), and runs
-`git worktree prune`. If the game wasn't running, any running dev client deletes the folder within a minute, and so
-does the next launch or reload in any checkout.
+seconds and quits. The next launch or reload in any checkout then deletes the game's folder and anything the removal
+left behind because the game had it open (on Windows, `git worktree remove` stops partway in that case), and runs
+`git worktree prune`.
 
 On launch the client opens **Dev Testing World**. If it doesn't exist yet, the client creates it with these settings:
 
@@ -190,7 +189,7 @@ returns JSON with an `ok` field. Requests run one at a time.
 | `POST /command` | body: a command, with or without `/`, or a JSON array of steps | Runs the command as the player at permission level 4. Client commands, such as `flywheel backend`, run on the client. Returns the chat output and whether it succeeded. On a remote server, the command goes through chat with the player's own permissions, and failure means a red reply. An array runs its steps in order and returns `results`, one per step. A step is a command, `{"waitTicks": 20}`, `{"waitUntil": "<command>", "timeoutTicks": 200}`, which reruns the command each tick until it succeeds and stops the batch if it never does, or `{"call": "/key?key=w&ticks=20", "body": "..."}`, which runs any endpoint here and stops the batch if it fails. Consecutive commands run within one server tick. `tp` and `teleport` turn creative flight on first, so the player doesn't fall. |
 | `POST /screenshot` | `?hud=false` hides the HUD; `?frames=<n>&intervalMs=<ms>` (up to 600 frames, default interval 100 ms; `0` takes consecutive frames) captures a sequence; `&video=mp4` or `&video=gif` also encodes it; `&audio=true` records the game's sound into an MP4; `&keep=<name>` keeps the result for chat | Saves PNGs under `screenshots/dev-tools/` in the game's folder and returns their paths. A sequence also returns `sheet`, one image with up to 36 evenly spread frames tiled left to right and top to bottom (`sheetFrames` lists which, when some are left out), `timesMs`, when each frame was taken, and `gameTimes`, the game time in ticks (with the partial tick) each frame drew. Frames are saved in the background, so a sequence doesn't slow the game down. `video` is made with ffmpeg and plays at the speed the frames were captured; an MP4 runs at 60 FPS and a GIF at 30 FPS, at most 960 pixels wide. With `hud=false`, an open chat is closed first; any other open screen still shows and is named in `screen`. `keep` copies the image, or the video and contact sheet, to the evidence folder, and returns `kept` and ready-to-paste `markdown`. See [Images in chat](#images-in-chat). |
 | `POST /camera` | `?x=&y=&z=`; optional `&face=north` (default: the side the player is on), `&distance=3` or `&fit=<W>` / `&fit=<W>x<H>`, `&screenshot=true`, `&hud=false`, `&keep=<name>` | Flies the player to look straight at that point from `distance` blocks off the given face, or far enough back that `W` by `H` blocks fill the view. Block coordinates aim at the block's center; decimals aim at that exact point. Waits until the client has moved, and can take a screenshot in the same call. |
-| `POST /look` | `?yaw=&pitch=`, `?dx=&dy=` (degrees from the current view), `?x=&y=&z=` or `?entity=<id>` | Turns the player without moving them, and returns the new crosshair target. |
+| `POST /look` | `?yaw=&pitch=`, `?dx=&dy=` (degrees from the current view), `?x=&y=&z=` or `?entity=<id>` | Turns the player without moving them, and returns the new crosshair target. Block coordinates aim at the block's center; decimals aim at that exact point. |
 | `GET /perf` | optional `?seconds=5` (0.5-60), `&namespace=<mod id>` (default: this mod), `&fps=<n>` or `&fps=unlimited` | Replaces a hidden game's frame rate cap for the measurement, if asked. Measures for that long and returns frame times (`avg`, `p50`, `p95`, `p99`, `max` in ms, and FPS), the CPU time each of the mod's block entity renderers takes per frame and how many it draws, server tick times over the last 100 ticks, and heap use. Renderer times cover building the geometry, not GPU time. |
 | `GET /sounds` | optional `?sinceMs=3000&filter=<text in the sound id>` | Sounds holding a channel now (`playing`), with `heardGain`, the volume estimated to reach the player after the category slider and distance, and every sound started in the last `sinceMs` (`started`). Master volume is reported separately: `masterVolume` is the setting, `outputGain` what the sound engine plays at. `silentDevice` says the game's sound is going into memory. |
 | `POST /audio` | `?seconds=5` (up to 300), or `?action=start` and later `?action=stop`; optional `&keep=<name>` | Records what the game plays to a WAV in `screenshots/dev-tools/`, and returns its `seconds`, `peakDb`, `rmsDb` and whether it's `silent`. `keep` saves an MP3 for chat. Only a hidden game can record, since only its sound stays in memory. |
@@ -327,8 +326,6 @@ single-player. The server quits after 30 idle minutes with nobody on it, or when
   `/flipdot_packet control <pos> <action>` or `/flipdot_packet upload <pos> <columns> <rows>` in chat. These dev-only
   client commands send the packets without the media screen and log the server's replies with a `RAW_MEDIA` prefix in
   the game's `logs/latest.log`. The server only accepts them for a display whose screen it opened for that player.
-  `/flipdot_packet connect <host:port>` leaves the world and joins a server, for testing as a non-op player on a
-  `runServer` with `online-mode=false`.
 - Create's kinetic blocks don't apply edits made with `data merge` to a running network. To change a creative motor's
   speed, replace it in one batch:
   `["setblock X Y Z air", "setblock X Y Z create:creative_motor[facing=F]{ScrollValue:256}"]`.
@@ -399,14 +396,6 @@ to, and those files stop displaying in their chats. `/status` reports the folder
 
 Scratch captures in a game's `screenshots/dev-tools/` go when that game next launches two days later, or with the
 worktree.
-
-### Recording a whole session
-
-An empty file named `dev-record-session` in a game's folder records that game from then on, until the file is removed
-or the game closes. Add it before the game starts to catch its launch; a running game notices within a few seconds. The
-evidence folder gets a `session-<time>.mkv` at up to 15 FPS with real timing, its sound mix on a silent device as raw
-48 kHz stereo 16-bit `.pcm`, and a `.log` of control API calls and commands, with their times and durations. Each game
-launch makes a new set. Nothing an agent does changes while recording.
 
 ## PR evidence
 

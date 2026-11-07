@@ -17,7 +17,7 @@ public final class ServerSmokeCheck {
                 .isEmpty()) throw new IllegalStateException("Flip-dot recipe missing on dedicated server");
         if (DisplayTarget.BY_BLOCK.get(ModContent.FLIP_DOT.get()) != ModContent.TARGET.get())
             throw new IllegalStateException("Display Link target missing");
-        System.out.println("FLIP_DOT_SERVER_CHECK PASS dedicated server, recipe, target and media networking loaded");
+        System.out.println("FLIP_DOT_SERVER_CHECK PASS dedicated server, recipe and Display Link target loaded");
         event.getServer().halt(false);
     }
 }

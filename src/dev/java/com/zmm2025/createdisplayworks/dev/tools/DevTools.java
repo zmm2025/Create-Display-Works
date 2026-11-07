@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
@@ -74,7 +75,6 @@ public final class DevTools {
             ? new HotReloader(paths("createdisplayworks.dev.classRoots"), paths("createdisplayworks.dev.resourceRoots"))
             : null;
 
-    private static final String RELOADED = "Reloaded the changes.";
     private static volatile PendingScreenshot screenshot;
     /** Encodes and saves screenshot frames off the render thread, so a sequence doesn't stall the frames it captures. */
     private static final ExecutorService SCREENSHOT_WRITERS =
@@ -91,6 +91,12 @@ public final class DevTools {
     private static final int REMOTE_COMMAND_TICKS = 6;
     /** Which worktree and branch this client runs; shown in the window title. */
     private static final String LABEL = System.getProperty("createdisplayworks.dev.label", "dev client");
+    /**
+     * Where images shown in chat live; Gradle picks the folder. Chat embeds a file by its path and reads it from disk
+     * each time it's displayed, so a deleted file shows up broken. This folder is outside the worktree and its game
+     * folder, which both go away when the worktree is removed.
+     */
+    private static final Path EVIDENCE = Path.of(System.getProperty("createdisplayworks.dev.evidence", "evidence"));
 
     private static FileChannel clientLock;
     private static boolean titled;
@@ -180,7 +186,6 @@ public final class DevTools {
         if (!ENABLED) return;
         DevInspect.frameRendered();
         DevPerf.frameRendered();
-        DevRecorder.frameRendered();
         PendingScreenshot pending = screenshot;
         if (pending == null || pending.framesToWait-- > 0) return;
         long now = System.nanoTime();
@@ -230,11 +235,11 @@ public final class DevTools {
 
     static JsonObject reload(String worktree, boolean full) throws Exception {
         if (worktree != null && !samePath(worktree, WORKTREE))
-            return failure("This game was launched from " + WORKTREE + ", not " + worktree
+            return DevApi.failure("This game was launched from " + WORKTREE + ", not " + worktree
                     + ". Close it and press Launch Minecraft in this worktree to try these changes.");
         Instrumentation instrumentation = instrumentation();
         if (instrumentation == null)
-            return failure(
+            return DevApi.failure(
                     "The dev agent is not attached. Close Minecraft and press Launch Minecraft to try these changes.");
         HotReloader.Result result = RELOADER.reload(instrumentation, DevTools.class.getClassLoader());
         Minecraft minecraft = Minecraft.getInstance();
@@ -275,7 +280,7 @@ public final class DevTools {
             message = "The game already runs this code.";
         } else {
             status = "reloaded";
-            message = RELOADED;
+            message = "Reloaded the changes.";
         }
         minecraft.execute(() -> {
             ChatFormatting color = status.equals("reloaded")
@@ -334,15 +339,15 @@ public final class DevTools {
             windowJson.addProperty("guiScale", window.getGuiScale());
             status.add("window", windowJson);
             status.add("held", DevInput.held());
-            status.addProperty("evidenceDirectory", slashes(evidenceDirectory()));
+            status.addProperty("evidenceDirectory", slashes(EVIDENCE));
             if (minecraft.player != null) {
                 JsonObject player = new JsonObject();
                 player.addProperty("name", minecraft.player.getGameProfile().getName());
-                player.addProperty("x", round(minecraft.player.getX()));
-                player.addProperty("y", round(minecraft.player.getY()));
-                player.addProperty("z", round(minecraft.player.getZ()));
-                player.addProperty("yaw", round(minecraft.player.getYRot()));
-                player.addProperty("pitch", round(minecraft.player.getXRot()));
+                player.addProperty("x", DevApi.round(minecraft.player.getX()));
+                player.addProperty("y", DevApi.round(minecraft.player.getY()));
+                player.addProperty("z", DevApi.round(minecraft.player.getZ()));
+                player.addProperty("yaw", DevApi.round(minecraft.player.getYRot()));
+                player.addProperty("pitch", DevApi.round(minecraft.player.getXRot()));
                 player.addProperty(
                         "dimension",
                         minecraft.player.level().dimension().location().toString());
@@ -376,7 +381,7 @@ public final class DevTools {
         List<JsonElement> steps = new ArrayList<>();
         if (batch) JsonParser.parseString(body).getAsJsonArray().forEach(steps::add);
         else steps.add(new JsonPrimitive(body));
-        if (Minecraft.getInstance().player == null) return failure("Not in a world.");
+        if (Minecraft.getInstance().player == null) return DevApi.failure("Not in a world.");
         JsonArray results = new JsonArray();
         boolean ok = true;
         for (int i = 0; i < steps.size(); i++) {
@@ -484,25 +489,16 @@ public final class DevTools {
     }
 
     private static List<JsonObject> runServerCommands(List<String> commands, boolean echo) throws Exception {
-        if (commands.isEmpty()) return List.of();
-        Minecraft minecraft = Minecraft.getInstance();
-        MinecraftServer server = minecraft.getSingleplayerServer();
         List<JsonObject> done = new ArrayList<>();
-        if (server == null) {
+        if (commands.isEmpty()) return done;
+        if (Minecraft.getInstance().getSingleplayerServer() == null) {
             for (String text : commands) done.add(runRemoteCommand(text, echo));
             return done;
         }
-        UUID id = minecraft.player.getUUID();
-        return server.submit(() -> {
-                    ServerPlayer player = server.getPlayerList().getPlayer(id);
-                    for (String command : commands) {
-                        long start = System.nanoTime();
-                        done.add(runCommand(server, player, command, echo));
-                        DevRecorder.log("/" + command, (System.nanoTime() - start) / 1_000_000);
-                    }
-                    return done;
-                })
-                .get(1, TimeUnit.MINUTES);
+        return onServer((server, player) -> {
+            for (String command : commands) done.add(runCommand(server, player, command, echo));
+            return done;
+        });
     }
 
     /**
@@ -565,22 +561,15 @@ public final class DevTools {
     static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video, String keep, boolean audio)
             throws Exception {
         if (frames < 1 || frames > 600 || intervalMs < 0 || intervalMs > 10_000)
-            return failure("Use 1-600 frames and an interval of 0-10000 ms.");
-        if (video != null && frames < 2) return failure("A video needs at least 2 frames.");
-        if (audio && !"mp4".equalsIgnoreCase(video)) return failure("Sound needs video=mp4; a GIF has no soundtrack.");
+            return DevApi.failure("Use 1-600 frames and an interval of 0-10000 ms.");
+        if (video != null && frames < 2) return DevApi.failure("A video needs at least 2 frames.");
+        if (audio && !"mp4".equalsIgnoreCase(video))
+            return DevApi.failure("Sound needs video=mp4; a GIF has no soundtrack.");
         Minecraft minecraft = Minecraft.getInstance();
-        String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS"));
-        Path folder = minecraft
-                .gameDirectory
-                .toPath()
-                .resolve("screenshots/dev-tools")
-                .toAbsolutePath()
-                .normalize();
+        Path sequence = scratchFile("");
         List<Path> files = new ArrayList<>();
-        if (frames == 1) files.add(folder.resolve(name + ".png"));
-        else
-            for (int i = 0; i < frames; i++)
-                files.add(folder.resolve(name).resolve(String.format("frame-%03d.png", i)));
+        if (frames == 1) files.add(sequence.resolveSibling(sequence.getFileName() + ".png"));
+        else for (int i = 0; i < frames; i++) files.add(sequence.resolve(String.format("frame-%03d.png", i)));
         PendingScreenshot pending = new PendingScreenshot(files, intervalMs * 1_000_000L);
         long audioStart = audio ? DevAudio.start() : 0;
         String screen = minecraft
@@ -621,9 +610,7 @@ public final class DevTools {
             sheetFrames.add(shown == frames ? i : (int) Math.round(i * (frames - 1.0) / (shown - 1)));
         response.addProperty(
                 "sheet",
-                contactSheet(
-                                sheetFrames.stream().map(files::get).toList(),
-                                folder.resolve(name).resolve("sheet.png"))
+                contactSheet(sheetFrames.stream().map(files::get).toList(), sequence.resolve("sheet.png"))
                         .toString());
         if (sheetFrames.size() < frames) {
             JsonArray shown = new JsonArray();
@@ -655,30 +642,28 @@ public final class DevTools {
         return response;
     }
 
-    /**
-     * Where images shown in chat live. Chat embeds a file by its path and reads it from disk each time it's displayed,
-     * so a deleted file shows up broken. This folder is outside the worktree and its game folder, which both go away
-     * when the worktree is removed.
-     */
-    static Path evidenceDirectory() {
-        Path game =
-                Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize();
-        return DevInstance.WORKTREE_INSTANCE
-                ? game.getParent().getParent().resolve("evidence").resolve(game.getFileName())
-                : game.resolve("evidence").resolve("main");
+    /** A new path named after the current time in the game's folder for scratch captures. */
+    static Path scratchFile(String extension) {
+        return Minecraft.getInstance()
+                .gameDirectory
+                .toPath()
+                .resolve("screenshots/dev-tools")
+                .toAbsolutePath()
+                .normalize()
+                .resolve(
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS")) + extension);
     }
 
     /** Copies a capture to the evidence folder, never over an earlier one, since chat may already show that file. */
     static void keep(String label, List<Path> captures, JsonObject response) throws IOException {
-        Path folder = evidenceDirectory();
-        Files.createDirectories(folder);
+        Files.createDirectories(EVIDENCE);
         String name = label.replaceAll("[^a-zA-Z0-9._-]", "-");
         JsonArray kept = new JsonArray(), markdown = new JsonArray();
         for (Path capture : captures) {
             String file = capture.getFileName().toString(), extension = file.substring(file.lastIndexOf('.'));
             String suffix = file.startsWith("sheet.") && captures.size() > 1 ? "-sheet" : "";
-            Path target = folder.resolve(name + suffix + extension);
-            for (int i = 2; Files.exists(target); i++) target = folder.resolve(name + suffix + "-" + i + extension);
+            Path target = EVIDENCE.resolve(name + suffix + extension);
+            for (int i = 2; Files.exists(target); i++) target = EVIDENCE.resolve(name + suffix + "-" + i + extension);
             Files.copy(capture, target, StandardCopyOption.COPY_ATTRIBUTES);
             kept.add(slashes(target));
             markdown.add("![" + label + "](" + slashes(target) + ")");
@@ -736,20 +721,19 @@ public final class DevTools {
                 query.get("mods"),
                 () -> onClient(() -> {
                     Minecraft minecraft = Minecraft.getInstance();
-                    if (minecraft.player == null || minecraft.gameMode == null) return failure("Not in a world.");
+                    if (minecraft.player == null || minecraft.gameMode == null)
+                        return DevApi.failure("Not in a world.");
                     HitResult target = minecraft.hitResult;
                     if (query.containsKey("entity")) {
                         var entity = minecraft.level.getEntity(Integer.parseInt(query.get("entity")));
-                        if (entity == null) return failure("No entity with that id is loaded.");
+                        if (entity == null) return DevApi.failure("No entity with that id is loaded.");
                         target = new EntityHitResult(
                                 entity, entity.getBoundingBox().getCenter());
                     } else if (query.containsKey("x")) {
-                        BlockPos pos = new BlockPos(
-                                Integer.parseInt(query.get("x")),
-                                Integer.parseInt(query.get("y")),
-                                Integer.parseInt(query.get("z")));
+                        BlockPos pos = DevApi.blockPos(query);
                         Direction face = Direction.byName(query.getOrDefault("face", "up"));
-                        if (face == null) return failure("Unknown face; use up, down, north, south, east or west.");
+                        if (face == null)
+                            return DevApi.failure("Unknown face; use up, down, north, south, east or west.");
                         target = new BlockHitResult(
                                 Vec3.atCenterOf(pos)
                                         .add(Vec3.atLowerCornerOf(face.getNormal())
@@ -826,7 +810,7 @@ public final class DevTools {
         if (target instanceof BlockHitResult block && target.getType() == HitResult.Type.BLOCK) {
             json.addProperty("type", "block");
             BlockPos pos = block.getBlockPos();
-            json.addProperty("pos", pos.getX() + " " + pos.getY() + " " + pos.getZ());
+            json.addProperty("pos", DevApi.position(pos));
             json.addProperty("face", block.getDirection().getName());
             var level = Minecraft.getInstance().level;
             if (level != null)
@@ -851,25 +835,20 @@ public final class DevTools {
         return Minecraft.getInstance().submit(action).get(1, TimeUnit.MINUTES);
     }
 
-    static JsonObject ok() {
-        JsonObject json = new JsonObject();
-        json.addProperty("ok", true);
-        return json;
-    }
-
-    static JsonObject failure(String message) {
-        JsonObject json = new JsonObject();
-        json.addProperty("ok", false);
-        json.addProperty("status", "error");
-        json.addProperty("message", message);
-        return json;
+    /** Runs on the integrated server's thread, with the server's copy of the client's player, and waits for it. */
+    static <T> T onServer(BiFunction<MinecraftServer, ServerPlayer, T> action) throws Exception {
+        Minecraft minecraft = Minecraft.getInstance();
+        MinecraftServer server = minecraft.getSingleplayerServer();
+        if (server == null || minecraft.player == null)
+            throw new IllegalStateException("Not in a single-player world.");
+        UUID id = minecraft.player.getUUID();
+        return server.submit(() -> action.apply(server, server.getPlayerList().getPlayer(id)))
+                .get(1, TimeUnit.MINUTES);
     }
 
     private static JsonArray strings(Collection<String> values) {
         JsonArray array = new JsonArray();
-        synchronized (values) {
-            values.forEach(array::add);
-        }
+        values.forEach(array::add);
         return array;
     }
 
@@ -910,9 +889,5 @@ public final class DevTools {
 
     private static String count(int n, String noun) {
         return n + " " + noun + (n == 1 ? "" : noun.endsWith("s") ? "es" : "s");
-    }
-
-    static double round(double value) {
-        return Math.round(value * 100) / 100.0;
     }
 }

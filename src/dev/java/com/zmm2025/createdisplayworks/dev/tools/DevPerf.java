@@ -87,10 +87,10 @@ final class DevPerf {
      * {@code fps} replaces a hidden game's frame rate cap while measuring: a number, or {@code unlimited}.
      */
     static JsonObject perf(double seconds, String namespace, String fps) throws Exception {
-        if (seconds < 0.5 || seconds > 60) return DevTools.failure("Measure for 0.5-60 seconds.");
-        if (session != null) return DevTools.failure("A measurement is already running.");
+        if (seconds < 0.5 || seconds > 60) return DevApi.failure("Measure for 0.5-60 seconds.");
+        if (session != null) return DevApi.failure("A measurement is already running.");
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.level == null) return DevTools.failure("Not in a world.");
+        if (minecraft.level == null) return DevApi.failure("Not in a world.");
         String mod = namespace == null || namespace.isBlank() ? CreateDisplayWorks.MOD_ID : namespace;
         Integer capBefore = DevInstance.fps();
         if (fps != null) {
@@ -135,11 +135,11 @@ final class DevPerf {
     }
 
     private static JsonObject report(Session measuring) {
-        JsonObject response = DevTools.ok();
+        JsonObject response = DevApi.ok();
         int count = measuring.frames.size();
         response.addProperty("frames", count);
         long total = measuring.frames.stream().mapToLong(Long::longValue).sum();
-        response.addProperty("fps", count == 0 ? 0 : DevTools.round(count / (total / 1e9)));
+        response.addProperty("fps", count == 0 ? 0 : DevApi.round(count / (total / 1e9)));
         response.add("frameMs", summary(measuring.frames));
 
         JsonObject renderers = new JsonObject();
@@ -147,7 +147,7 @@ final class DevPerf {
             if (stats.calls == 0) return;
             JsonObject json = summary(stats.nanosPerFrame);
             json.addProperty(
-                    "rendersPerFrame", DevTools.round((double) stats.calls / Math.max(1, stats.nanosPerFrame.size())));
+                    "rendersPerFrame", DevApi.round((double) stats.calls / Math.max(1, stats.nanosPerFrame.size())));
             renderers.add(type, json);
         });
         response.add("blockEntityRenderMsPerFrame", renderers);
@@ -155,11 +155,10 @@ final class DevPerf {
         MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
         if (server != null) {
             JsonObject tick = new JsonObject();
-            tick.addProperty("avg", DevTools.round(server.getAverageTickTimeNanos() / 1e6));
+            tick.addProperty("avg", DevApi.round(server.getAverageTickTimeNanos() / 1e6));
             tick.addProperty(
                     "max",
-                    DevTools.round(
-                            Arrays.stream(server.getTickTimesNanos()).max().orElse(0) / 1e6));
+                    DevApi.round(Arrays.stream(server.getTickTimesNanos()).max().orElse(0) / 1e6));
             response.add("serverTickMsLast100Ticks", tick);
         }
         Runtime runtime = Runtime.getRuntime();
@@ -172,11 +171,11 @@ final class DevPerf {
         JsonObject json = new JsonObject();
         if (nanos.isEmpty()) return json;
         long[] sorted = nanos.stream().mapToLong(Long::longValue).sorted().toArray();
-        json.addProperty("avg", DevTools.round(Arrays.stream(sorted).average().orElse(0) / 1e6));
-        json.addProperty("p50", DevTools.round(sorted[sorted.length / 2] / 1e6));
-        json.addProperty("p95", DevTools.round(sorted[Math.min(sorted.length - 1, (int) (sorted.length * .95))] / 1e6));
-        json.addProperty("p99", DevTools.round(sorted[Math.min(sorted.length - 1, (int) (sorted.length * .99))] / 1e6));
-        json.addProperty("max", DevTools.round(sorted[sorted.length - 1] / 1e6));
+        json.addProperty("avg", DevApi.round(Arrays.stream(sorted).average().orElse(0) / 1e6));
+        json.addProperty("p50", DevApi.round(sorted[sorted.length / 2] / 1e6));
+        json.addProperty("p95", DevApi.round(sorted[Math.min(sorted.length - 1, (int) (sorted.length * .95))] / 1e6));
+        json.addProperty("p99", DevApi.round(sorted[Math.min(sorted.length - 1, (int) (sorted.length * .99))] / 1e6));
+        json.addProperty("max", DevApi.round(sorted[sorted.length - 1] / 1e6));
         return json;
     }
 

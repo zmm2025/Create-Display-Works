@@ -8,10 +8,6 @@ import com.zmm2025.createdisplayworks.CreateDisplayWorks;
 import com.zmm2025.createdisplayworks.media.*;
 import java.util.Arrays;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.TitleScreen;
-import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
@@ -68,27 +64,7 @@ public final class RawMediaPackets {
                                                                             "raw-packet-test.png"));
                                                             report("sent upload to " + pos.toShortString());
                                                             return 1;
-                                                        })))))
-                        // Leaves the current world and joins a server, to test as a non-op player on a dedicated
-                        // server.
-                        .then(Commands.literal("connect")
-                                .then(Commands.argument("address", StringArgumentType.greedyString())
-                                        .executes(c -> {
-                                            String address = StringArgumentType.getString(c, "address");
-                                            var minecraft = Minecraft.getInstance();
-                                            minecraft.execute(() -> {
-                                                if (minecraft.level != null) minecraft.level.disconnect();
-                                                minecraft.disconnect();
-                                                ConnectScreen.startConnecting(
-                                                        new TitleScreen(),
-                                                        minecraft,
-                                                        ServerAddress.parseString(address),
-                                                        new ServerData("Test server", address, ServerData.Type.OTHER),
-                                                        false,
-                                                        null);
-                                            });
-                                            return 1;
-                                        }))));
+                                                        }))))));
     }
 
     private static BlockPos pos(CommandContext<CommandSourceStack> c) {

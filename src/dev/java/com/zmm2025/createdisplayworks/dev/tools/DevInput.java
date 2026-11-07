@@ -118,19 +118,18 @@ final class DevInput {
     /** Moves the cursor in the open screen, in {@code steps} even moves, dragging if a mouse button is down. */
     static JsonObject mouse(Map<String, String> query) throws Exception {
         int steps = Integer.parseInt(query.getOrDefault("steps", "1"));
-        if (steps < 1 || steps > 200) return DevTools.failure("Use 1-200 steps.");
+        if (steps < 1 || steps > 200) return DevApi.failure("Use 1-200 steps.");
         return DevTools.onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
-            if (minecraft.screen == null) return DevTools.failure("No screen is open to move the mouse in.");
+            if (minecraft.screen == null) return DevApi.failure("No screen is open to move the mouse in.");
             double[] target = DevScreens.locate(query);
-            if (target == null)
-                return DevTools.failure("Pass x and y, or the text or slot of something on the screen.");
+            if (target == null) return DevApi.failure("Pass x and y, or the text or slot of something on the screen.");
             Window window = minecraft.getWindow();
             double fromX = minecraft.mouseHandler.xpos() * window.getWidth() / window.getScreenWidth();
             double fromY = minecraft.mouseHandler.ypos() * window.getHeight() / window.getScreenHeight();
             for (int i = 1; i <= steps && minecraft.screen != null; i++)
                 moveCursor(fromX + (target[0] - fromX) * i / steps, fromY + (target[1] - fromY) * i / steps);
-            return DevTools.ok();
+            return DevApi.ok();
         });
     }
 
@@ -144,11 +143,11 @@ final class DevInput {
                 () -> DevTools.onClient(() -> {
                     Minecraft minecraft = Minecraft.getInstance();
                     if (minecraft.screen == null && minecraft.player == null)
-                        return DevTools.failure("No screen is open to scroll, and the player isn't in a world.");
+                        return DevApi.failure("No screen is open to scroll, and the player isn't in a world.");
                     ((MouseHandlerAccessor) minecraft.mouseHandler)
                             .createDisplayWorksDev$onScroll(
                                     minecraft.getWindow().getWindow(), 0, delta);
-                    JsonObject response = DevTools.ok();
+                    JsonObject response = DevApi.ok();
                     if (minecraft.player != null)
                         response.addProperty("selectedSlot", minecraft.player.getInventory().selected);
                     return response;
@@ -158,12 +157,12 @@ final class DevInput {
     static JsonObject type(String text) throws Exception {
         return DevTools.onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
-            if (minecraft.screen == null) return DevTools.failure("No screen is open to type into.");
+            if (minecraft.screen == null) return DevApi.failure("No screen is open to type into.");
             KeyboardHandlerAccessor keyboard = (KeyboardHandlerAccessor) minecraft.keyboardHandler;
             text.codePoints()
                     .forEach(c -> keyboard.createDisplayWorksDev$charTyped(
                             minecraft.getWindow().getWindow(), c, heldModifiers()));
-            return DevTools.ok();
+            return DevApi.ok();
         });
     }
 
@@ -175,20 +174,14 @@ final class DevInput {
         return DevTools.onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
             var player = minecraft.player;
-            if (player == null) return DevTools.failure("Not in a world.");
+            if (player == null) return DevApi.failure("Not in a world.");
             float yaw = player.getYRot(), pitch = player.getXRot();
             Vec3 target = null;
             if (query.containsKey("entity")) {
                 Entity entity = minecraft.level.getEntity(Integer.parseInt(query.get("entity")));
-                if (entity == null) return DevTools.failure("No entity with that id is loaded.");
+                if (entity == null) return DevApi.failure("No entity with that id is loaded.");
                 target = entity.getBoundingBox().getCenter();
-            } else if (query.containsKey("x")) {
-                target = new Vec3(
-                        Double.parseDouble(query.get("x")),
-                        Double.parseDouble(query.get("y")),
-                        Double.parseDouble(query.get("z")));
-                if (!query.get("x").contains(".")) target = target.add(0.5, 0.5, 0.5);
-            }
+            } else if (query.containsKey("x")) target = DevApi.point(query);
             if (target != null) {
                 Vec3 look = target.subtract(player.getEyePosition());
                 yaw = (float) Math.toDegrees(Math.atan2(-look.x, look.z));
@@ -204,9 +197,9 @@ final class DevInput {
             player.yRotO = yaw;
             player.xRotO = pitch;
             minecraft.gameRenderer.pick(1);
-            JsonObject response = DevTools.ok();
-            response.addProperty("yaw", DevTools.round(yaw));
-            response.addProperty("pitch", DevTools.round(pitch));
+            JsonObject response = DevApi.ok();
+            response.addProperty("yaw", DevApi.round(yaw));
+            response.addProperty("pitch", DevApi.round(pitch));
             response.add("target", DevTools.describe(minecraft.hitResult));
             return response;
         });
@@ -219,12 +212,12 @@ final class DevInput {
                 .filter(line -> !line.isEmpty())
                 .map(Path::of)
                 .toList();
-        if (paths.isEmpty()) return DevTools.failure("Send the file paths in the body, one per line.");
+        if (paths.isEmpty()) return DevApi.failure("Send the file paths in the body, one per line.");
         return DevTools.onClient(() -> {
             Screen screen = Minecraft.getInstance().screen;
-            if (screen == null) return DevTools.failure("No screen is open to drop files on.");
+            if (screen == null) return DevApi.failure("No screen is open to drop files on.");
             screen.onFilesDrop(paths);
-            return DevTools.ok();
+            return DevApi.ok();
         });
     }
 
@@ -276,9 +269,9 @@ final class DevInput {
     private static JsonObject input(Map<String, String> query, Press press) throws Exception {
         String action = query.getOrDefault("action", "tap");
         int ticks = Integer.parseInt(query.getOrDefault("ticks", "0"));
-        if (ticks < 0 || ticks > MAX_HOLD_TICKS) return DevTools.failure("Hold for 0-" + MAX_HOLD_TICKS + " ticks.");
+        if (ticks < 0 || ticks > MAX_HOLD_TICKS) return DevApi.failure("Hold for 0-" + MAX_HOLD_TICKS + " ticks.");
         if (ticks > 0 && !action.equals("tap"))
-            return DevTools.failure("Use ticks without action; it presses and releases.");
+            return DevApi.failure("Use ticks without action; it presses and releases.");
         return switch (action) {
             case "tap" ->
                 withModifiers(query.get("mods"), () -> {
@@ -294,7 +287,7 @@ final class DevInput {
                             return null;
                         });
                     }
-                    JsonObject response = DevTools.ok();
+                    JsonObject response = DevApi.ok();
                     if (ticks > 0) response.addProperty("heldTicks", ticks);
                     return response;
                 });
@@ -304,7 +297,7 @@ final class DevInput {
                     press.set(true);
                     return null;
                 });
-                yield DevTools.ok();
+                yield DevApi.ok();
             }
             case "up" -> {
                 DevTools.onClient(() -> {
@@ -312,9 +305,9 @@ final class DevInput {
                     return null;
                 });
                 pressModifiers(modifierKeys(query.get("mods")), false);
-                yield DevTools.ok();
+                yield DevApi.ok();
             }
-            default -> DevTools.failure("Unknown action " + action + "; use tap, down or up.");
+            default -> DevApi.failure("Unknown action " + action + "; use tap, down or up.");
         };
     }
 
@@ -323,10 +316,9 @@ final class DevInput {
         if (!DevScreens.locates(query)) return null;
         return DevTools.onClient(() -> {
             if (Minecraft.getInstance().screen == null)
-                return DevTools.failure("No screen is open to move the mouse in; world clicks go to the crosshair.");
+                return DevApi.failure("No screen is open to move the mouse in; world clicks go to the crosshair.");
             double[] target = DevScreens.locate(query);
-            if (target == null)
-                return DevTools.failure("Nothing on the screen matches; GET /screen lists what's there.");
+            if (target == null) return DevApi.failure("Nothing on the screen matches; GET /screen lists what's there.");
             moveCursor(target[0], target[1]);
             return null;
         });

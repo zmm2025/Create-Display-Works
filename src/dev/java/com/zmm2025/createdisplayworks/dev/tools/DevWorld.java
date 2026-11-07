@@ -93,22 +93,22 @@ final class DevWorld {
             }
             Thread.sleep(100);
         }
-        return DevTools.failure("Didn't get into the world within 2 minutes; check /status.");
+        return DevApi.failure("Didn't get into the world within 2 minutes; check /status.");
     }
 
     /** Writes the world to disk now. {@code save-all} is only a command on dedicated servers. */
     static JsonObject save() throws Exception {
         MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
-        if (server == null) return DevTools.failure("Not in a single-player world.");
+        if (server == null) return DevApi.failure("Not in a single-player world.");
         server.submit(() -> server.saveEverything(true, true, true)).get(2, TimeUnit.MINUTES);
-        return DevTools.ok();
+        return DevApi.ok();
     }
 
     /** Saves and leaves the current world for the title screen, as Save and Quit does. */
     static JsonObject disconnect() throws Exception {
         Minecraft minecraft = Minecraft.getInstance();
         minecraft.submit(() -> leave(minecraft)).get(2, TimeUnit.MINUTES);
-        return DevTools.ok();
+        return DevApi.ok();
     }
 
     private static void leave(Minecraft minecraft) {

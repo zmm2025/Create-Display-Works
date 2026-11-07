@@ -2,17 +2,12 @@ package com.zmm2025.createdisplayworks.dev.tools;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.zmm2025.createdisplayworks.CreateDisplayWorks;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -44,14 +39,10 @@ public final class DevServerControl {
     public static void started(ServerStartedEvent event) throws IOException {
         if (!Boolean.getBoolean("createdisplayworks.dev.serverControl")) return;
         MinecraftServer server = event.getServer();
-        http = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 0), 0);
-        http.setExecutor(Executors.newSingleThreadExecutor(task -> {
-            Thread thread = new Thread(task, "Display Works Dev Server Control");
-            thread.setDaemon(true);
-            return thread;
-        }));
-        http.createContext("/", exchange -> handle(exchange, server));
-        http.start();
+        http = DevApi.serve(0, "Display Works Dev Server Control", (path, query, body) -> {
+            lastRequest = System.currentTimeMillis();
+            return run(server, path, query, body);
+        });
         controlPort = http.getAddress().getPort();
         String worktree = System.getProperty("createdisplayworks.dev.worktree", "");
         JsonObject info = new JsonObject();
@@ -83,51 +74,26 @@ public final class DevServerControl {
         if (http != null) http.stop(0);
     }
 
-    private static void handle(HttpExchange exchange, MinecraftServer server) throws IOException {
-        if (!DevControlServer.fromLocalTool(exchange)) {
-            DevControlServer.refuse(exchange);
-            return;
-        }
-        lastRequest = System.currentTimeMillis();
-        JsonObject response;
-        int code = 200;
-        try {
-            Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            response = switch (exchange.getRequestURI().getPath()) {
-                case "/status" -> status(server);
-                case "/command" -> {
-                    String command = body.isBlank() ? query.getOrDefault("command", "") : body;
-                    yield server.submit(() -> DevPlayers.run(server, server.createCommandSourceStack(), command))
-                            .get(1, TimeUnit.MINUTES);
-                }
-                case "/player" -> DevPlayers.player(server, query);
-                case "/quit" -> {
-                    server.halt(false);
-                    JsonObject ok = new JsonObject();
-                    ok.addProperty("ok", true);
-                    yield ok;
-                }
-                default -> {
-                    code = 404;
-                    JsonObject unknown = new JsonObject();
-                    unknown.addProperty("ok", false);
-                    unknown.addProperty("message", "Unknown endpoint; see DEVELOPMENT.md.");
-                    yield unknown;
-                }
-            };
-        } catch (Exception e) {
-            code = 500;
-            response = new JsonObject();
-            response.addProperty("ok", false);
-            response.addProperty("message", e.toString());
-        }
-        DevControlServer.send(exchange, code, response);
+    private static JsonObject run(MinecraftServer server, String path, Map<String, String> query, String body)
+            throws Exception {
+        return switch (path) {
+            case "/status" -> status(server);
+            case "/command" -> {
+                String command = body.isBlank() ? query.getOrDefault("command", "") : body;
+                yield server.submit(() -> DevPlayers.run(server, server.createCommandSourceStack(), command))
+                        .get(1, TimeUnit.MINUTES);
+            }
+            case "/player" -> DevPlayers.player(server, query);
+            case "/quit" -> {
+                server.halt(false);
+                yield DevApi.ok();
+            }
+            default -> null;
+        };
     }
 
     private static JsonObject status(MinecraftServer server) {
-        JsonObject status = new JsonObject();
-        status.addProperty("ok", true);
+        JsonObject status = DevApi.ok();
         status.addProperty("gamePort", server.getPort());
         status.addProperty("port", controlPort);
         JsonArray players = new JsonArray();
@@ -136,17 +102,5 @@ public final class DevServerControl {
                 .forEach(player -> players.add(player.getGameProfile().getName()));
         status.add("players", players);
         return status;
-    }
-
-    private static Map<String, String> query(String raw) {
-        Map<String, String> query = new LinkedHashMap<>();
-        if (raw == null) return query;
-        for (String pair : raw.split("&")) {
-            int split = pair.indexOf('=');
-            String key = split < 0 ? pair : pair.substring(0, split),
-                    value = split < 0 ? "" : pair.substring(split + 1);
-            query.put(URLDecoder.decode(key, StandardCharsets.UTF_8), URLDecoder.decode(value, StandardCharsets.UTF_8));
-        }
-        return query;
     }
 }
