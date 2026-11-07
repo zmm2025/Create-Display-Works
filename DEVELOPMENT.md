@@ -429,6 +429,56 @@ an empty structure with the helpers in
 [DevGameTests](src/dev/java/com/zmm2025/createdisplayworks/dev/gametest/DevGameTests.java) registers them and says
 how to add a class for a new block.
 
+## Generated resources
+
+Content is registered with Create's Registrate (`CreateDisplayWorks.REGISTRATE`), one class per kind of thing:
+[ModBlocks](src/main/java/com/zmm2025/createdisplayworks/ModBlocks.java) (blocks and their items),
+[ModBlockEntities](src/main/java/com/zmm2025/createdisplayworks/ModBlockEntities.java) (with their renderers and
+Flywheel visuals), [ModDisplayTargets](src/main/java/com/zmm2025/createdisplayworks/ModDisplayTargets.java),
+[ModSounds](src/main/java/com/zmm2025/createdisplayworks/ModSounds.java) and
+[ModCreativeTabs](src/main/java/com/zmm2025/createdisplayworks/ModCreativeTabs.java). Standalone items would go in a
+`ModItems` class.
+
+`./gradlew runData` writes `src/generated/resources` from them, in about 15 seconds. The folder is committed, and
+`runData` empties it first, so files nothing generates any more disappear.
+
+| Generated | From |
+| --- | --- |
+| Blockstates | `.blockstate(...)`, such as [FlipDotBlockStateGen](src/main/java/com/zmm2025/createdisplayworks/flipdot/FlipDotBlockStateGen.java) |
+| Item models | `.item()...model(...)`. `customItemModel()` makes one that points to hand-made geometry in `models/block/<name>/item.json`. |
+| Loot tables, recipes and their unlock advancements, tags | `.loot(...)` (the default drops the block), `.recipe(...)`, `.tag(...)` |
+| `sounds.json` | `ModSounds` |
+| `lang/en_us.json`, `lang/en_ud.json` | `.lang(...)` and `addRawLang` in registrations, [src/main/lang/en_us.json](src/main/lang/en_us.json), and the Ponder scenes. See "Language" in [AGENTS.md](AGENTS.md#language). |
+
+Models with real geometry, textures, sounds, Ponder structures and other assets stay hand-made in
+`src/main/resources`, and generated files point to them. A file must not be in both folders.
+
+`./gradlew build` and `devReload` run `checkGeneratedResources`, which takes a moment and fails when a string in
+`src/main/lang/en_us.json` hasn't been generated yet, or a file is both hand-written and generated. It can't see other
+stale output, so CI runs `runData` and fails if that changes anything under `src/generated`.
+
+## Adding a block
+
+1. **Block:** write the block class (and its block entity, renderer or visual if it has them) in a package for the
+   feature, like `flipdot`.
+2. **Register:** add it to `ModBlocks` with its properties, `.transform(pickaxeOnly())` or other tags,
+   `.blockstate(...)`, `.recipe(...)`, `.lang("English Name")` and `.item(...)`. Add its block entity to
+   `ModBlockEntities` with `.visual(...)` and `.renderer(...)`, a display target to `ModDisplayTargets` with
+   `.transform(displayTarget(...))` on the block, and sounds to `ModSounds`. New registrations need a game restart.
+3. **Assets:** add hand-made models and textures under `src/main/resources/assets/create_display_works`, and
+   player-facing strings that aren't names to `src/main/lang/en_us.json`.
+4. **Generate:** run `./gradlew runData`, check what changed in `src/generated/resources`, and commit it.
+5. **GameTests:** add a class like
+   [FlipDotTests](src/dev/java/com/zmm2025/createdisplayworks/dev/flipdot/FlipDotTests.java), built with
+   [GameTestKit](src/dev/java/com/zmm2025/createdisplayworks/dev/gametest/GameTestKit.java), and register it in
+   [DevGameTests](src/dev/java/com/zmm2025/createdisplayworks/dev/gametest/DevGameTests.java). Cover what the server
+   must know from the generated data too: the recipe loads, it drops itself, Display Links find it.
+6. **Fixture:** add a JSON file to [src/dev/resources/dev-fixtures](src/dev/resources/dev-fixtures) that builds it
+   working (see [Fixtures](#fixtures)), and dev commands under `/displayworks_dev <block>` if it needs them.
+7. **Ponder:** add scenes to [DisplayWorksPonderPlugin](src/main/java/com/zmm2025/createdisplayworks/ponder/DisplayWorksPonderPlugin.java)
+   (or a plugin class per feature once it grows), with structures in `assets/create_display_works/ponder`, and add the
+   block to the fitting Create Ponder tags. Run `runData` again for the scene text.
+
 ## Other runs
 
 - `./gradlew runClient` / `runServer` are the plain NeoForge runs, using the checkout's own `run/` and `build/server-run/`.

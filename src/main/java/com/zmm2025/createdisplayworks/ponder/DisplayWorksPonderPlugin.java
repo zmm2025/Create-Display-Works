@@ -17,7 +17,7 @@ public final class DisplayWorksPonderPlugin implements PonderPlugin {
     }
 
     public void registerScenes(PonderSceneRegistrationHelper<ResourceLocation> helper) {
-        helper.forComponents(ModContent.FLIP_DOT.getId())
+        helper.forComponents(ModBlocks.FLIP_DOT_DISPLAY.getId())
                 .addStoryBoard("flip_dot", DisplayWorksPonderPlugin::drive)
                 .addStoryBoard("flip_dot", DisplayWorksPonderPlugin::information)
                 .addStoryBoard("flip_dot", DisplayWorksPonderPlugin::media);
@@ -25,9 +25,9 @@ public final class DisplayWorksPonderPlugin implements PonderPlugin {
 
     public void registerTags(PonderTagRegistrationHelper<ResourceLocation> helper) {
         helper.addToTag(ResourceLocation.fromNamespaceAndPath("create", "kinetic_appliances"))
-                .add(ModContent.FLIP_DOT.getId());
+                .add(ModBlocks.FLIP_DOT_DISPLAY.getId());
         helper.addToTag(ResourceLocation.fromNamespaceAndPath("create", "display_targets"))
-                .add(ModContent.FLIP_DOT.getId());
+                .add(ModBlocks.FLIP_DOT_DISPLAY.getId());
     }
 
     private static CreateSceneBuilder base(SceneBuilder builder, SceneBuildingUtil util, String id, String title) {

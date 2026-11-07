@@ -2,7 +2,6 @@ package com.zmm2025.createdisplayworks.flipdot;
 
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.zmm2025.createdisplayworks.ModContent;
 import com.zmm2025.createdisplayworks.media.MediaClip;
 import com.zmm2025.createdisplayworks.media.MediaLimits;
 import com.zmm2025.createdisplayworks.media.MediaStore;
@@ -14,6 +13,7 @@ import net.minecraft.nbt.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
@@ -59,8 +59,8 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
     private int mediaFrame;
     private boolean mediaPlaying, mediaLoop = true;
 
-    public FlipDotBlockEntity(BlockPos pos, BlockState state) {
-        super(ModContent.FLIP_DOT_ENTITY.get(), pos, state);
+    public FlipDotBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+        super(type, pos, state);
         setLazyTickRate(20);
     }
 

@@ -1,27 +1,27 @@
 {
   "type": "minecraft:crafting_shaped",
   "category": "redstone",
-  "pattern": [
-    " E ",
-    "BCB",
-    " P "
-  ],
   "key": {
-    "E": {
-      "item": "create:electron_tube"
-    },
     "B": {
       "item": "create:brass_sheet"
     },
     "C": {
       "item": "create:brass_casing"
     },
+    "E": {
+      "item": "create:electron_tube"
+    },
     "P": {
       "item": "create:cogwheel"
     }
   },
+  "pattern": [
+    " E ",
+    "BCB",
+    " P "
+  ],
   "result": {
-    "id": "create_display_works:flip_dot_display",
-    "count": 1
+    "count": 1,
+    "id": "create_display_works:flip_dot_display"
   }
 }

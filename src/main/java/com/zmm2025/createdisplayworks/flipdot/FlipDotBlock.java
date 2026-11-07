@@ -8,7 +8,8 @@ import com.simibubi.create.content.equipment.wrench.IWrenchable;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 import com.simibubi.create.foundation.block.IBE;
-import com.zmm2025.createdisplayworks.ModContent;
+import com.zmm2025.createdisplayworks.ModBlockEntities;
+import com.zmm2025.createdisplayworks.ModBlocks;
 import com.zmm2025.createdisplayworks.media.MediaClip;
 import com.zmm2025.createdisplayworks.media.MediaNetwork;
 import java.util.ArrayList;
@@ -49,11 +50,11 @@ public class FlipDotBlock extends HorizontalKineticBlock
 
     private static final int PLACEMENT = PlacementHelpers.register(new IPlacementHelper() {
         public Predicate<ItemStack> getItemPredicate() {
-            return s -> s.is(ModContent.FLIP_DOT_ITEM.get());
+            return s -> ModBlocks.FLIP_DOT_DISPLAY.isIn(s);
         }
 
         public Predicate<BlockState> getStatePredicate() {
-            return s -> s.is(ModContent.FLIP_DOT.get());
+            return s -> ModBlocks.FLIP_DOT_DISPLAY.has(s);
         }
 
         public PlacementOffset getOffset(
@@ -146,7 +147,7 @@ public class FlipDotBlock extends HorizontalKineticBlock
 
     @Override
     public BlockEntityType<? extends FlipDotBlockEntity> getBlockEntityType() {
-        return ModContent.FLIP_DOT_ENTITY.get();
+        return ModBlockEntities.FLIP_DOT_DISPLAY.get();
     }
 
     @Override

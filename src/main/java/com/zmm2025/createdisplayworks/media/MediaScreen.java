@@ -8,7 +8,7 @@ import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import com.simibubi.create.foundation.gui.widget.ScrollInput;
 import com.simibubi.create.foundation.gui.widget.TooltipArea;
-import com.zmm2025.createdisplayworks.ModContent;
+import com.zmm2025.createdisplayworks.ModBlocks;
 import com.zmm2025.createdisplayworks.flipdot.FlipDotBlockEntity;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -32,7 +32,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemDisplayContext;
-import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.system.MemoryStack;
@@ -747,7 +746,7 @@ public final class MediaScreen extends AbstractSimiScreen {
             minecraft
                     .getItemRenderer()
                     .render(
-                            new ItemStack(ModContent.FLIP_DOT.get()),
+                            ModBlocks.FLIP_DOT_DISPLAY.asStack(),
                             ItemDisplayContext.NONE,
                             false,
                             g.pose(),

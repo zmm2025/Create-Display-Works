@@ -17,6 +17,13 @@ If the turn changed anything under `src/`, run `./gradlew devReload` from this w
 before your final reply. Don't run it after intermediate edits: if you're still going to change code, or the build
 or tests fail and you're fixing them, wait. Skip it when nothing under `src/` changed.
 
+Before that, if the turn changed anything data generation reads, run `./gradlew runData` and keep what it changes in
+`src/generated/resources` as part of the change. That covers registrations (`Mod*` classes such as `ModBlocks`, and
+the blockstate generators they use), `src/main/lang/en_us.json`, Ponder scenes and hand-made models a generated file
+points to. Never edit files under `src/generated` by hand; `runData` replaces the whole folder. `build` and `devReload`
+fail on a lang string that `runData` hasn't picked up yet, but can't see other stale data. CI runs `runData` and fails
+if anything under `src/generated` changes.
+
 ### The closing line
 
 A closing line tells the user what they have to do to see this turn's change in their own game. Write it from what
@@ -149,10 +156,22 @@ asked. Do this for each change, not one summary image. A text description doesn'
 - Write chat replies, code, comments, docs, commit messages and PR text in American English (color, behavior,
   center, gray). Names that come from Minecraft, NeoForge or Create keep their own spelling, such as
   `BlockBehaviour` or `setColour`.
-- `en_us.json` is the mod's source language. Write every player-facing string there in American English, even when
+- English (`en_us`) is the mod's source language. Write every player-facing string in American English, even when
   you match Create's wording, since Create's own lang file mixes spellings. Other locale files, such as `en_gb.json`,
   follow their own locale's spelling and conventions.
-- Never hard-code text a player can see or hear. Put it in `en_us.json` and use `Component.translatable` with
+- Datagen writes the English lang file, `src/generated/resources/assets/create_display_works/lang/en_us.json`, and its
+  upside-down `en_ud.json`. Never edit them. Each string has exactly one source, and `runData` fails if two sources
+  give the same key:
+  - Names of registered things live in their registration: `.lang("...")` on a block or other builder in the `Mod*`
+    classes, a subtitle in `ModSounds`, and `REGISTRATE.addRawLang(key, text)` for other keys that belong to a
+    registration, such as the creative tab title.
+  - Ponder text lives in the scene code in `DisplayWorksPonderPlugin` (`scene.title(...)`, `.text(...)`). Ponder
+    makes the keys.
+  - Every other string goes in [src/main/lang/en_us.json](src/main/lang/en_us.json): screen text, chat and
+    action-bar messages, tooltips, config option names and the like.
+
+  Then run `./gradlew runData` (see [When you finish a turn](#when-you-finish-a-turn)).
+- Never hard-code text a player can see or hear. Put it in one of those sources and use `Component.translatable` with
   arguments for numbers and names, not `Component.literal` or string concatenation. This covers screen labels,
   buttons, tooltips, hints, status and error text, chat and action-bar messages, subtitles, config option names,
   and file dialog titles (pass them through `.getString()`). When the server sends text for the client to show, send

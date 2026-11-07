@@ -12,7 +12,8 @@ import com.simibubi.create.content.equipment.clipboard.ClipboardContent;
 import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlockEntity;
-import com.zmm2025.createdisplayworks.ModContent;
+import com.zmm2025.createdisplayworks.ModBlocks;
+import com.zmm2025.createdisplayworks.ModDisplayTargets;
 import com.zmm2025.createdisplayworks.dev.gametest.DevGameTests;
 import com.zmm2025.createdisplayworks.dev.gametest.GameTestKit;
 import com.zmm2025.createdisplayworks.flipdot.DotMatrix;
@@ -190,7 +191,8 @@ public final class FlipDotTests {
                 .thenExecute(() -> {
                     link.updateGatheredData();
                     helper.assertTrue(
-                            link.activeTarget == ModContent.TARGET.get(), "The Display Link doesn't target the board");
+                            link.activeTarget == ModDisplayTargets.FLIP_DOT_DISPLAY.get(),
+                            "The Display Link doesn't target the board");
                 })
                 .thenWaitUntil(() -> board.assertShows(3, 0, DotMatrix.tile("15", 0, 32)))
                 .thenSucceed();
@@ -228,13 +230,8 @@ public final class FlipDotTests {
         // A display used near the top of a tile's face goes above it, facing the same way.
         var nearTop = Vec3.atLowerCornerOf(board.pos(3, 1)).add(0.5, 0.95, 0.2);
         GameTestKit.use(
-                helper,
-                player,
-                new ItemStack(ModContent.FLIP_DOT_ITEM.get()),
-                board.pos(3, 1),
-                Direction.NORTH,
-                nearTop);
-        helper.assertBlockPresent(ModContent.FLIP_DOT.get(), board.pos(3, 2));
+                helper, player, ModBlocks.FLIP_DOT_DISPLAY.asStack(), board.pos(3, 1), Direction.NORTH, nearTop);
+        helper.assertBlockPresent(ModBlocks.FLIP_DOT_DISPLAY.get(), board.pos(3, 2));
         helper.assertBlockProperty(board.pos(3, 2), FlipDotBlock.HORIZONTAL_FACING, Direction.NORTH);
         helper.assertValueEqual(
                 board.tile(3, 1).pendingBits(), DotMatrix.tile("RUN", 0, 32), "queued dots after placing a tile");
@@ -280,9 +277,9 @@ public final class FlipDotTests {
         helper.assertTrue(turned.getValue(BlockStateProperties.WATERLOGGED), "Turning it lost its water");
         player.setShiftKeyDown(true);
         GameTestKit.use(helper, player, AllItems.WRENCH.asStack(), pos, Direction.UP);
-        helper.assertBlockNotPresent(ModContent.FLIP_DOT.get(), pos);
+        helper.assertBlockNotPresent(ModBlocks.FLIP_DOT_DISPLAY.get(), pos);
         helper.assertValueEqual(
-                player.getInventory().countItem(ModContent.FLIP_DOT_ITEM.get()),
+                player.getInventory().countItem(ModBlocks.FLIP_DOT_DISPLAY.asItem()),
                 1,
                 "displays a survival player got back from sneak-wrenching");
         // Its water stays behind; don't let it spread into other tests.
@@ -359,7 +356,7 @@ public final class FlipDotTests {
         var drops = Block.getDrops(tile.getBlockState(), helper.getLevel(), tile.getBlockPos(), tile);
         helper.assertValueEqual(drops.size(), 1, "stacks dropped");
         var drop = drops.getFirst();
-        helper.assertTrue(drop.is(ModContent.FLIP_DOT_ITEM.get()), "It didn't drop a display");
+        helper.assertTrue(drop.is(ModBlocks.FLIP_DOT_DISPLAY.asItem()), "It didn't drop a display");
         helper.assertTrue(drop.getComponentsPatch().isEmpty(), "The dropped display kept its colors or content");
         helper.assertValueEqual(drop.getMaxStackSize(), 64, "stack size of dropped displays");
         helper.succeed();
@@ -371,15 +368,16 @@ public final class FlipDotTests {
         helper.assertTrue(
                 helper.getLevel()
                         .getRecipeManager()
-                        .byKey(ModContent.FLIP_DOT.getId())
+                        .byKey(ModBlocks.FLIP_DOT_DISPLAY.getId())
                         .isPresent(),
                 "The crafting recipe isn't loaded");
         helper.assertTrue(
-                DisplayTarget.BY_BLOCK.get(ModContent.FLIP_DOT.get()) == ModContent.TARGET.get(),
+                DisplayTarget.BY_BLOCK.get(ModBlocks.FLIP_DOT_DISPLAY.get())
+                        == ModDisplayTargets.FLIP_DOT_DISPLAY.get(),
                 "Display Links don't know the display");
         // Like Create's Display Board, which it matches in speed.
         helper.assertValueEqual(
-                BlockStressValues.getImpact(ModContent.FLIP_DOT.get()),
+                BlockStressValues.getImpact(ModBlocks.FLIP_DOT_DISPLAY.get()),
                 BlockStressValues.getImpact(AllBlocks.DISPLAY_BOARD.get()),
                 "stress impact");
         helper.succeed();
@@ -424,7 +422,7 @@ public final class FlipDotTests {
         }
 
         static BlockState display() {
-            return ModContent.FLIP_DOT
+            return ModBlocks.FLIP_DOT_DISPLAY
                     .get()
                     .defaultBlockState()
                     .setValue(FlipDotBlock.HORIZONTAL_FACING, Direction.NORTH);

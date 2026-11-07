@@ -1,6 +1,6 @@
 package com.zmm2025.createdisplayworks.flipdot;
 
-import com.zmm2025.createdisplayworks.ModContent;
+import com.zmm2025.createdisplayworks.ModSounds;
 import java.lang.ref.WeakReference;
 import java.util.*;
 import net.minecraft.client.Minecraft;
@@ -17,7 +17,7 @@ public final class DiscRattle extends AbstractTickableSoundInstance {
     private int silent;
 
     private DiscRattle(FlipDotBlockEntity board) {
-        super(ModContent.RATTLE.get(), SoundSource.BLOCKS, RandomSource.create());
+        super(ModSounds.DISC_RATTLE.get(), SoundSource.BLOCKS, RandomSource.create());
         this.board = new WeakReference<>(board);
         looping = true;
         delay = 0;
