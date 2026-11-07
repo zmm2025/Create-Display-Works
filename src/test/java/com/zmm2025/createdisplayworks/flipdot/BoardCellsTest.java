@@ -5,14 +5,21 @@ import static org.junit.jupiter.api.Assertions.*;
 import static com.zmm2025.createdisplayworks.flipdot.BoardCells.*;
 
 class BoardCellsTest {
-    @Test void aQuarterTurnReshapesTheBoard() {
-        int[] wide = {BoardCells.pack(0, 0), BoardCells.pack(1, 0), BoardCells.pack(2, 0), BoardCells.pack(0, 1), BoardCells.pack(1, 1), BoardCells.pack(2, 1)};
-        int[] tall = {BoardCells.pack(1, 0), BoardCells.pack(1, 1), BoardCells.pack(1, 2), BoardCells.pack(0, 0), BoardCells.pack(0, 1), BoardCells.pack(0, 2)};
-        assertTrue(BoardCells.reshaped(wide, tall, wide));
-        assertFalse(BoardCells.reshaped(wide, wide, wide));
-        assertFalse(BoardCells.reshaped(wide, java.util.Arrays.copyOf(tall, 5), wide));
-    }
     private static final int[] SQUARE = {pack(0, 0), pack(1, 0), pack(0, 1), pack(1, 1)};
+
+    @Test void quarterTurnsAreToldApartFromFlips() {
+        int[] wide = {pack(0, 0), pack(1, 0), pack(2, 0), pack(0, 1), pack(1, 1), pack(2, 1)};
+        int[] tall = {pack(1, 0), pack(1, 1), pack(1, 2), pack(0, 0), pack(0, 1), pack(0, 2)};
+        assertTrue(quarterTurned(wide, tall, wide));
+        assertFalse(quarterTurned(wide, wide, wide));
+        assertFalse(quarterTurned(wide, java.util.Arrays.copyOf(tall, 5), wide));
+        int[] line = {pack(0, 0), pack(1, 0), pack(2, 0)}, column = {pack(0, 0), pack(0, 1), pack(0, 2)};
+        assertTrue(quarterTurned(line, column, line));
+        assertTrue(quarterTurned(column, line, column));
+        assertTrue(quarterTurned(SQUARE, new int[]{pack(1, 0), pack(1, 1), pack(0, 0), pack(0, 1)}, SQUARE));
+        assertFalse(quarterTurned(SQUARE, new int[]{pack(1, 1), pack(0, 1), pack(1, 0), pack(0, 0)}, SQUARE));
+        assertFalse(quarterTurned(SQUARE, new int[]{pack(1, 0), pack(0, 0), pack(1, 1), pack(0, 1)}, SQUARE));
+    }
 
     @Test void cellsPackNegativeColumnsAndRows() {
         for (int column = -31; column <= 31; column++) for (int row = -31; row <= 31; row++) {

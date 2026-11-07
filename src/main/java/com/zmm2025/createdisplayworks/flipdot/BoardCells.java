@@ -22,12 +22,18 @@ public final class BoardCells {
     public static boolean valid(int cell) {
         return cell != NONE && Math.abs(column(cell)) < FlipDotAssembly.MAX_SPAN && Math.abs(row(cell)) < FlipDotAssembly.MAX_SPAN;
     }
-    /** Whether the same tiles of one earlier board now form a different shape, as after a quarter turn. */
-    public static boolean reshaped(int[] previous, int[] current, int[] previousShape) {
+    /** Whether the tiles of one earlier board were given a quarter turn, so tiles that shared a row or column no longer do. */
+    public static boolean quarterTurned(int[] previous, int[] current, int[] previousShape) {
         if (previous.length != current.length || previous.length != previousShape.length) return false;
-        int[] before = previous.clone(), after = current.clone(), shape = previousShape.clone();
-        Arrays.sort(before); Arrays.sort(after); Arrays.sort(shape);
-        return Arrays.equals(before, shape) && !Arrays.equals(before, after);
+        if (Arrays.equals(previous, current)) return false;
+        int[] before = previous.clone(), shape = previousShape.clone();
+        Arrays.sort(before); Arrays.sort(shape);
+        if (!Arrays.equals(before, shape)) return false;
+        for (int i = 0; i < previous.length; i++) for (int j = i + 1; j < previous.length; j++) {
+            if (row(previous[i]) == row(previous[j]) && row(current[i]) != row(current[j])) return true;
+            if (column(previous[i]) == column(previous[j]) && column(current[i]) != column(current[j])) return true;
+        }
+        return false;
     }
     /**
      * Finds how a board's tiles were rearranged when the whole board was turned, flipped or mirrored. {@code previous}
