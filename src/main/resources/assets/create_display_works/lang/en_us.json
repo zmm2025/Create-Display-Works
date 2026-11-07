@@ -58,7 +58,7 @@
   "screen.create_display_works.media.tools_prompt.message": "This import needs tools that aren't installed yet. They're a download of about %s MB, saved for later imports.",
   "screen.create_display_works.media.tools_prompt.download": "Download",
   "screen.create_display_works.media.tools_prompt.update_title": "Update media tools?",
-  "screen.create_display_works.media.tools_prompt.update_message": "A newer version of the YouTube tools is available, and YouTube may not work without it. The update is a download of about %s MB.",
+  "screen.create_display_works.media.tools_prompt.update_message": "The YouTube tools need an update, and YouTube may not work without it. The update is a download of about %s MB.",
   "screen.create_display_works.media.tools_prompt.update": "Update",
   "screen.create_display_works.media.empty.check_source": "Check the source",
   "screen.create_display_works.media.empty.check_connection": "Check your connection",

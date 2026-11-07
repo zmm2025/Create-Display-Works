@@ -151,6 +151,28 @@ tasks.named('test', Test).configure {
     if (project.hasProperty('mediaChecks')) systemProperty 'flipdot.mediaChecks', 'true'
 }
 
+// Compares main's yt-dlp with the one a media tools PR would give players, on a real video. See PUBLISHING.md.
+tasks.register('checkYouTubeTools', Test) {
+    description = "Imports a YouTube video with main's media tool list and with an update branch's list, and compares them."
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    // The import code reads the Media Tools setting, which needs NeoForge's config classes.
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching 'com.zmm2025.createdisplayworks.media.YouTubeToolsCheck' }
+    systemProperty 'youtubeTools.check', 'true'
+    // Runs in its own folder, which keeps the tools it downloads and the logs NeoForge writes out of the checkout.
+    var checkDir = layout.buildDirectory.dir('youtube-tools-check').get().asFile
+    workingDir = checkDir
+    systemProperty 'youtubeTools.dir', checkDir.absolutePath
+    doFirst { checkDir.mkdirs() }
+    systemProperty 'youtubeTools.branch', providers.gradleProperty('branch').getOrElse('chore/media-tools-update')
+    systemProperty 'youtubeTools.video', providers.gradleProperty('video').getOrElse('https://www.youtube.com/watch?v=FtutLA63Cp8')
+    // YouTube can change at any time, so the result is never up to date.
+    outputs.upToDateWhen { false }
+    testLogging { showStandardStreams = true }
+}
+
 // This block of code expands all declared replace properties in the specified resource targets.
 // A missing property will result in an error. Properties are expanded using ${} Groovy notation.
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {

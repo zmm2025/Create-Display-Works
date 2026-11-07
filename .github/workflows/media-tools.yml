@@ -97,8 +97,8 @@ jobs:
 
           ## Testing
 
-          Before merging, a YouTube import in a dev client with this branch's list is the best check that YouTube works
-          with the new yt-dlp.
+          Run \`./gradlew checkYouTubeTools\` before merging. It imports a YouTube video with \`main\`'s yt-dlp and with
+          this branch's, on your own connection, and prints whether each works. See PUBLISHING.md.
           EOF
 
           number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')

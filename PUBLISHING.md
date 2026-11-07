@@ -39,7 +39,15 @@ release they have installed, or else use the list built into their jar.
 
 - The [Media tools workflow](.github/workflows/media-tools.yml) checks for a new yt-dlp every day. It takes each hash
   from the release's `SHA2-256SUMS`, downloads every file to check it, runs the Linux build, and opens or updates a
-  PR from `chore/media-tools-update`. Before merging, try a YouTube import with that branch's list if you can.
+  PR from `chore/media-tools-update`.
+- To review an update PR, run `./gradlew checkYouTubeTools` on your computer. It imports a YouTube video twice with
+  the mod's own code, once with the yt-dlp in `main`'s list and once with the PR's, and prints whether each works.
+  Your home connection matters: YouTube often blocks downloads from servers like GitHub's, so the workflow can't
+  reliably do this check itself. Use `-Pbranch=<branch>` for another branch and `-Pvideo=<link>` for another video.
+- Every update you merge asks players to download the new yt-dlp, so you don't have to merge every PR. Merging when
+  `main`'s yt-dlp fails the check is enough. After merging, a YouTube import in **Launch Minecraft** from `main` shows
+  exactly what players see. If something's wrong, revert the merge, and players go back to the previous yt-dlp on
+  their next import.
 - Deno only changes when you run the workflow by hand with a Deno version (or `latest`), because yt-dlp rarely needs
   a newer one and each update is a 40 MB download for players.
 - The workflow needs **Allow GitHub Actions to create and approve pull requests** turned on in **Settings > Actions >
