@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class MediaTools {
     /** Helpers are larger than media and only download once, so slow connections get longer than media links do. */
     private static final Duration DOWNLOAD_LIMIT=Duration.ofMinutes(10);
-    private static final long DOWNLOAD_BYTES=200L*1024*1024;
+    static final long DOWNLOAD_BYTES=200L*1024*1024;
     static final String MANIFEST="verified";
     /** Folders whose files matched their manifest this session; checking them again on every import would be wasted work. */
     private static final Set<Path> CHECKED=ConcurrentHashMap.newKeySet();
