@@ -63,6 +63,15 @@ final class DevControlServer {
     }
 
     private static JsonObject dispatch(String path, Map<String, String> query, String body) throws Exception {
+        long start = System.nanoTime();
+        try {
+            return run(path, query, body);
+        } finally {
+            if(!path.equals("/status") && !path.equals("/command")) DevRecorder.log(path + (query.isEmpty() ? "" : " " + query) + (body.isBlank() ? "" : " " + body.substring(0, Math.min(body.length(), 80))), (System.nanoTime() - start) / 1_000_000);
+        }
+    }
+
+    private static JsonObject run(String path, Map<String, String> query, String body) throws Exception {
         return switch(path) {
             case "/status" -> DevTools.status();
             case "/window" -> DevInstance.window(query);

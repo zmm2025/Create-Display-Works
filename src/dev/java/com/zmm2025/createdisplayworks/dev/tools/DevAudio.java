@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
@@ -37,6 +38,8 @@ public final class DevAudio {
     private static volatile Thread renderer;
     /** Guarded by {@link #LOCK}. Null unless recording. */
     private static ByteArrayOutputStream recording;
+    /** Guarded by {@link #LOCK}. Null unless a session is being recorded. */
+    private static OutputStream session;
     private static volatile long recordingStarted;
 
     private DevAudio() {}
@@ -114,9 +117,33 @@ public final class DevAudio {
             SOFTLoopback.alcRenderSamplesSOFT(handle, buffer, frames);
             rendered += frames;
             synchronized(LOCK) {
-                if(recording == null || recording.size() >= MAX_BYTES) continue;
+                boolean record = recording != null && recording.size() < MAX_BYTES;
+                if(!record && session == null) continue;
                 buffer.get(0, copy, 0, frames * BYTES_PER_FRAME);
-                recording.write(copy, 0, frames * BYTES_PER_FRAME);
+                if(record) recording.write(copy, 0, frames * BYTES_PER_FRAME);
+                if(session != null) writeSession(copy, frames * BYTES_PER_FRAME);
+            }
+        }
+    }
+
+    private static void writeSession(byte[] samples, int length) {
+        try {
+            session.write(samples, 0, length);
+        } catch(IOException e) {
+            LOGGER.warn("Stopped recording the session's sound", e);
+            session = null;
+        }
+    }
+
+    /** Sends the mix to {@code file} as well, for a session recording; null stops. */
+    static void tap(Path file) {
+        synchronized(LOCK) {
+            try {
+                if(session != null) session.close();
+                session = file == null ? null : Files.newOutputStream(file);
+            } catch(IOException e) {
+                LOGGER.warn("Could not record the session's sound", e);
+                session = null;
             }
         }
     }

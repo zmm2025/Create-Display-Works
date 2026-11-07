@@ -129,9 +129,9 @@ asked. Do this for each change, not one summary image. A text description doesn'
   response's `markdown` is ready to paste into your reply.
 - For motion, add `frames=<n>&intervalMs=<ms>&video=gif` to `/screenshot`. `keep` saves the GIF and its contact sheet.
 - Chat reads an image from disk every time it's shown, so a deleted file shows up broken. Kept files live in the
-  main checkout's `run/evidence/<worktree>/`, which outlives the worktree for a while and is pruned automatically
-  ("Images in chat" in DEVELOPMENT.md). Don't delete them by hand, and embed nothing from `screenshots/dev-tools/`,
-  a scratch folder or `build/`. Copy an image from anywhere else into the `evidenceDirectory` that `/status` reports.
+  main checkout's `run/evidence/<worktree>/`, which survives the worktree and is never cleaned up. Never delete them,
+  and embed nothing from `screenshots/dev-tools/`, a scratch folder or `build/`. Copy an image from anywhere else
+  into the `evidenceDirectory` that `/status` reports first.
 - Open each image before you embed it. A wrong camera angle proves nothing.
 - Subagents capture the evidence and return the absolute image paths. The parent thread embeds them.
 

@@ -160,6 +160,7 @@ public final class DevTools {
         if(!ENABLED) return;
         DevInspect.frameRendered();
         DevPerf.frameRendered();
+        DevRecorder.frameRendered();
         PendingScreenshot pending = screenshot;
         if(pending == null || pending.framesToWait-- > 0) return;
         long now = System.nanoTime();
@@ -411,7 +412,11 @@ public final class DevTools {
         UUID id = minecraft.player.getUUID();
         return server.submit(() -> {
             ServerPlayer player = server.getPlayerList().getPlayer(id);
-            for(String command : commands) done.add(runCommand(server, player, command, echo));
+            for(String command : commands) {
+                long start = System.nanoTime();
+                done.add(runCommand(server, player, command, echo));
+                DevRecorder.log("/" + command, (System.nanoTime() - start) / 1_000_000);
+            }
             return done;
         }).get(1, TimeUnit.MINUTES);
     }
@@ -538,7 +543,7 @@ public final class DevTools {
      * so a deleted file shows up broken. This folder is outside the worktree and its game folder, which both go away
      * when the worktree is removed.
      */
-    private static Path evidenceDirectory() {
+    static Path evidenceDirectory() {
         Path game = Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize();
         return DevInstance.WORKTREE_INSTANCE ? game.getParent().getParent().resolve("evidence").resolve(game.getFileName()) : game.resolve("evidence").resolve("main");
     }

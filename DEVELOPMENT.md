@@ -390,19 +390,23 @@ work. A worktree's game hides instead of minimizing for this reason.
 ## Images in chat
 
 T3 Code stores an embedded image as its file path and reads the file each time it displays the message: once the file
-is gone, the image's address answers 404 and no new one can be issued. That's the only reason anything is kept outside
-PR evidence, which GitHub stores separately once it's uploaded.
+is gone, the image's address answers 404 and no new one can be issued. So files shown in chat live in
+`run/evidence/<worktree>/` in the main checkout (`run/evidence/main/` for its own game), which isn't deleted with the
+worktree or its game folder. `keep=<name>` on `/screenshot`, `/camera` or `/audio` puts them there, and never replaces
+an earlier file, since chat may already show it. Nothing cleans this folder up; delete from it by hand if you ever want
+to, and those files stop displaying in their chats. `/status` reports the folder as `evidenceDirectory`. Git ignores
+`run/`, so it stays out of every branch.
 
-| Files | Where | Removed |
-| --- | --- | --- |
-| Scratch captures: every screenshot, frame and recording | `screenshots/dev-tools/` in the game's folder | Two days old, at that game's next launch, or with the worktree |
-| Kept files: only what `keep=<name>` saves, for embedding | `run/evidence/<worktree>/` in the main checkout (`run/evidence/main/` for its own game) | 14 days after the worktree is gone. In `main`, at 14 days old. Oldest first past 250 MB in total, across all threads. |
+Scratch captures in a game's `screenshots/dev-tools/` go when that game next launches two days later, or with the
+worktree.
 
-Launches apply these limits, set by `KEPT_DAYS`, `KEPT_MEGABYTES` and `SCRATCH_DAYS` in
-[gradle/dev-client.gradle](gradle/dev-client.gradle). Once a file is pruned, it shows as broken in that old thread.
+### Recording a whole session
 
-`keep` never replaces an earlier file, since chat may already show it. `/status` reports the folder as
-`evidenceDirectory`. Git ignores `run/`, so it stays out of every branch.
+An empty file named `dev-record-session` in a game's folder records that game from then on, until the file is removed
+or the game closes. Add it before the game starts to catch its launch; a running game notices within a few seconds. The
+evidence folder gets a `session-<time>.mkv` at up to 15 FPS with real timing, its sound mix on a silent device as raw
+48 kHz stereo 16-bit `.pcm`, and a `.log` of control API calls and commands, with their times and durations. Each game
+launch makes a new set. Nothing an agent does changes while recording.
 
 ## PR evidence
 

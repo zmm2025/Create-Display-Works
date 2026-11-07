@@ -181,6 +181,7 @@ final class DevInstance {
     private static void check(String worktree) {
         Minecraft minecraft = Minecraft.getInstance();
         Path gameDirectory = minecraft.gameDirectory.toPath().toAbsolutePath().normalize();
+        DevRecorder.check(gameDirectory);
         if(checkCount++ % 30 == 0) removeOrphans(WORKTREE_INSTANCE ? gameDirectory.getParent().getParent() : gameDirectory);
         if(closing) return;
         String reason = null;
