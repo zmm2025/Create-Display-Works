@@ -28,7 +28,7 @@ class MediaDecoderTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flipdot.youtubeCheck", matches = "true")
+    @EnabledIfSystemProperty(named = "media.youtubeCheck", matches = "true")
     void publicYoutubeImport() throws Exception {
         var clip = MediaDecoder.decode(
                 "https://www.youtube.com/watch?v=FtutLA63Cp8",
@@ -69,7 +69,7 @@ class MediaDecoderTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flipdot.mediaChecks", matches = "true")
+    @EnabledIfSystemProperty(named = "media.formatsCheck", matches = "true")
     void importsAllRequestedFormatsWithTheReleaseDecoder() throws Exception {
         for (String extension : new String[] {
             "png", "jpg", "jpeg", "heic", "heif", "ico", "webp", "svg", "gif", "apng", "mp4", "mov", "mkv", "webm"

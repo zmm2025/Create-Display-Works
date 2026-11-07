@@ -82,18 +82,19 @@ neoForge {
     runs {
         client {
             client()
-            if (project.hasProperty('gameplayCheck')) {
-                programArguments.addAll '--quickPlaySingleplayer', project.findProperty('testWorld') ?: 'Flip Dot Gameplay Test'
-                systemProperty 'flipdot.verify', 'true'
-                systemProperty 'flipdot.showcase', project.findProperty('showcase') ?: 'factory'
-            }
         }
 
         server {
             server()
             gameDirectory = file('build/server-run')
             programArgument '--nogui'
-            if (project.hasProperty('serverCheck')) systemProperty 'flipdot.serverCheck', 'true'
+        }
+
+        // ./gradlew runGameTestServer runs the GameTests in src/dev on a headless dedicated server, and fails if any do.
+        gameTestServer {
+            type = 'gameTestServer'
+            gameDirectory = file('build/gametest-run')
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
         data {
@@ -147,8 +148,8 @@ dependencies {
 
 tasks.named('test', Test).configure {
     useJUnitPlatform()
-    if (project.hasProperty('youtubeCheck')) systemProperty 'flipdot.youtubeCheck', 'true'
-    if (project.hasProperty('mediaChecks')) systemProperty 'flipdot.mediaChecks', 'true'
+    if (project.hasProperty('youtubeCheck')) systemProperty 'media.youtubeCheck', 'true'
+    if (project.hasProperty('mediaChecks')) systemProperty 'media.formatsCheck', 'true'
 }
 
 // Compares main's yt-dlp with the one a media tools PR would give players, on a real video. See PUBLISHING.md.

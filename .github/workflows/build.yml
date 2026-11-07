@@ -32,6 +32,10 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew build
 
+      # A headless dedicated server that runs the GameTests in src/dev and exits non-zero if any fail.
+      - name: Run GameTests
+        run: ./gradlew runGameTestServer
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:

@@ -209,7 +209,7 @@ returns JSON with an `ok` field. Requests run one at a time.
 | `POST /scroll` | `?delta=1`; optional `?x=&y=`, `?text=` or `?slot=`, `&mods=` | Scrolls the wheel over the open screen, or in the world, where it changes the hotbar slot unless a mod takes it. |
 | `POST /release` | | Lets go of everything held. Leaving a world does the same. `/status` lists what's held under `held`, with the key mappings that are down. |
 | `POST /drop` | body: file paths, one per line | Drops the files on the open screen, as dragging them onto the window does. Native file dialogs can't be driven, so test imports this way. |
-| `POST /fixture` | `?name=board`, `contraption` or `train`; optional `&x=&y=&z=`, `&verbose=true` | Builds a working test setup. See [Fixtures](#fixtures). |
+| `POST /fixture` | `?name=board`, `contraption`, `train` or any other fixture; optional `&x=&y=&z=`, `&verbose=true` | Builds a working test setup. See [Fixtures](#fixtures). |
 | `POST /player` | `?name=Alex`; optional `&op=true`, `&command=<command>`, `&x=&y=&z=&face=`, `&leave=true`; no parameters lists players | Adds a second player. See [A second player or a dedicated server](#a-second-player-or-a-dedicated-server). |
 | `POST /save` | | Writes the world to disk now. `save-all` only exists on dedicated servers. |
 | `POST /connect` | `?host=localhost:25700` or `?world=<name>` (default: the test world) | Leaves the current world and joins that server or world, returning once the player is in. |
@@ -250,8 +250,8 @@ A whole interaction fits in one request, which costs an agent far less than one 
 
 `POST /fixture?name=<name>` builds a working setup in a few seconds, each in its own spot far from the world's builds.
 It returns the coordinates of its `parts`, the commands to `clear` it, and any `failed` steps. Recipes are batch steps
-in [src/dev/resources/dev-fixtures](src/dev/resources/dev-fixtures), so they're also worked examples, and adding one
-means adding a file and its name in `DevFixtures`.
+in [src/dev/resources/dev-fixtures](src/dev/resources/dev-fixtures), so they're also worked examples. Each JSON file
+there is a fixture named after the file, so adding one means adding a file; `devReload` makes it available.
 
 | Name | What you get |
 | --- | --- |
@@ -260,6 +260,11 @@ means adding a file and its name in `DevFixtures`.
 | `train` | Stations Alpha and Beta 50 blocks apart, and an assembled train at Alpha, facing Beta, with a seat, controls and a Blaze Burner conductor. |
 
 A train outlives `clear`: run `create train remove <uuid>` first, with the UUID from `/entities?type=carriage`.
+
+For a new block, add a fixture that builds it working, a class of GameTests next to
+[FlipDotTests](src/dev/java/com/zmm2025/createdisplayworks/dev/flipdot/FlipDotTests.java) (see
+[GameTests](#gametests)), and any dev commands under `/displayworks_dev <block>` in its own class (see
+[DevCommands](src/dev/java/com/zmm2025/createdisplayworks/dev/DevCommands.java)).
 
 ### A second player or a dedicated server
 
@@ -322,10 +327,13 @@ single-player. The server quits after 30 idle minutes with nobody on it, or when
   that form or the full id. A stranger's `/player` right-click answers `"use": "FAIL"` in a claim.
 - Carry On needs empty hands and at most 2.5 blocks of distance. `mods=sneak` on `/click` picks up a block.
 - To force an autosave-only path, such as saved-data cleanup, `tick sprint 6300` runs a save interval quickly.
+- Dev-only commands live under `/displayworks_dev`. `/displayworks_dev flipdot animate <pos> stripes|invert|checker`
+  plays a generated clip on a board, for render and performance tests.
 - To check what the server does with media packets a modified client could send, type
-  `/flipdot_packet control <pos> <action>` or `/flipdot_packet upload <pos> <columns> <rows>` in chat. These dev-only
-  client commands send the packets without the media screen and log the server's replies with a `RAW_MEDIA` prefix in
-  the game's `logs/latest.log`. The server only accepts them for a display whose screen it opened for that player.
+  `/displayworks_dev media packet control <pos> <action>` or
+  `/displayworks_dev media packet upload <pos> <columns> <rows>` in chat. These client commands send the packets
+  without the media screen and log the server's replies with a `RAW_MEDIA` prefix in the game's `logs/latest.log`.
+  The server only accepts them for a display whose screen it opened for that player.
 - Create's kinetic blocks don't apply edits made with `data merge` to a running network. To change a creative motor's
   speed, replace it in one batch:
   `["setblock X Y Z air", "setblock X Y Z create:creative_motor[facing=F]{ScrollValue:256}"]`.
@@ -410,8 +418,19 @@ JetBrains Runtime and every dev tool are limited to the `runDevClient` run and t
 of them ship in the mod jar. `./gradlew build` still targets Java 21 and produces `build/libs/*.jar`, which runs on
 the regular Minecraft Java runtime in any launcher, such as Modrinth, with your own account.
 
+## GameTests
+
+`./gradlew runGameTestServer` runs the mod's GameTests on a headless dedicated server in `build/gametest-run/`, and
+fails if any test fails. CI runs it after the build. Because it's a dedicated server, it also proves the mod loads
+without client classes. The tests live in `src/dev`, one class per block, such as
+[FlipDotTests](src/dev/java/com/zmm2025/createdisplayworks/dev/flipdot/FlipDotTests.java), and build their setups in
+an empty structure with the helpers in
+[GameTestKit](src/dev/java/com/zmm2025/createdisplayworks/dev/gametest/GameTestKit.java).
+[DevGameTests](src/dev/java/com/zmm2025/createdisplayworks/dev/gametest/DevGameTests.java) registers them and says
+how to add a class for a new block.
+
 ## Other runs
 
 - `./gradlew runClient` / `runServer` are the plain NeoForge runs, using the checkout's own `run/` and `build/server-run/`.
-- `./gradlew runClient -PgameplayCheck` and `runServer -PserverCheck` run the automated flip-dot checks in
-  [src/dev](src/dev).
+- `./gradlew test -PmediaChecks` also imports sample files of every media format from `build/media-decoder-check/`,
+  and `-PyoutubeCheck` imports a public YouTube video.

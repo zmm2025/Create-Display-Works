@@ -12,6 +12,6 @@
     "setblock {x-1} {y} {z} create:cogwheel[axis=z]",
     "setblock {x-1} {y} {z+1} create:creative_motor[facing=north]{ScrollValue:64}",
     {"waitTicks": 10},
-    "flipdot_demo animate {x+3} {y+1} {z} stripes"
+    "displayworks_dev flipdot animate {x+3} {y+1} {z} stripes"
   ]
 }

@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import com.zmm2025.createdisplayworks.CreateDisplayWorks;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -14,18 +15,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.LevelResource;
+import net.neoforged.fml.ModList;
 
 /**
  * Builds a test setup from a recipe in {@code src/dev/resources/dev-fixtures}: a list of {@code /command} batch steps
  * with coordinates relative to an origin, written as {@code {x+3}}. Each fixture gets its own spot, far from the world's
  * builds, unless the request names one. The recipe's {@code parts} and {@code clear} come back with real coordinates.
+ * Every JSON file in that folder is a fixture named after the file, so adding one needs no code.
  */
 final class DevFixtures {
-    private static final List<String> NAMES = List.of("board", "contraption", "train");
+    private static final String FOLDER = "dev-fixtures";
     /** Where fixtures start, and how far apart they are along X. */
     private static final int FIRST = 4096, SPACING = 128;
 
@@ -35,7 +39,8 @@ final class DevFixtures {
 
     static JsonObject fixture(Map<String, String> query) throws Exception {
         String name = query.get("name");
-        if (!NAMES.contains(name)) return DevApi.failure("Use name=" + String.join(", ", NAMES) + ".");
+        List<String> names = names();
+        if (!names.contains(name)) return DevApi.failure("Use name=" + String.join(", ", names) + ".");
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
         if (server == null || minecraft.player == null) return DevApi.failure("Fixtures need a single-player world.");
@@ -64,8 +69,27 @@ final class DevFixtures {
         return response;
     }
 
+    /**
+     * The fixtures in the mod's resources, read from the folder each time, so a file added since launch counts once
+     * {@code devReload} has copied it.
+     */
+    private static List<String> names() throws IOException {
+        Path folder = ModList.get()
+                .getModFileById(CreateDisplayWorks.MOD_ID)
+                .getFile()
+                .findResource(FOLDER);
+        if (!Files.isDirectory(folder)) return List.of();
+        try (Stream<Path> files = Files.list(folder)) {
+            return files.map(file -> file.getFileName().toString())
+                    .filter(file -> file.endsWith(".json"))
+                    .map(file -> file.substring(0, file.length() - ".json".length()))
+                    .sorted()
+                    .toList();
+        }
+    }
+
     private static JsonObject recipe(String name) throws IOException {
-        try (InputStream in = DevFixtures.class.getResourceAsStream("/dev-fixtures/" + name + ".json")) {
+        try (InputStream in = DevFixtures.class.getResourceAsStream("/" + FOLDER + "/" + name + ".json")) {
             if (in == null) throw new IOException("No recipe for " + name);
             return JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8))
                     .getAsJsonObject();

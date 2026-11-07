@@ -93,6 +93,8 @@ fixtures instead of building by hand. "Agent control API" and "Testing tips" in 
   command, since that takes some ticks to reach the client. `/close` closes a screen; Escape with none open pauses.
 - `/screen`, `/chat` and `/entities` read what's on screen as text, so most checks need no screenshot.
 - `/fixture?name=board`, `contraption` or `train` builds a working setup in seconds and returns its coordinates.
+- `./gradlew runGameTestServer` runs the GameTests headless, with no game window. Prefer a GameTest for server-side
+  behavior you want checked on every build; "GameTests" in DEVELOPMENT.md says how to add them.
 - `/options` changes game settings and puts them back. `/player` adds a second player, and `devServerStart` a
   dedicated server, for permission tests.
 - `/status` and `/screenshot` let you check the result. Open the PNG it returns to look at it.
