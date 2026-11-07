@@ -15,6 +15,7 @@ import java.util.zip.ZipInputStream;
 public final class MediaDecoder {
     private static final String FORMATS="png_pipe,jpeg_pipe,gif,mov,matroska,webm,webp_pipe,bmp_pipe,image2,image2pipe,apng,ico,webp";
     private static final String VERSION="8.0.1-1.5.13";
+    private static final int DECODER_MB=30;
     private static final long MAX_BYTES=100L*1024*1024;
     private static final java.util.concurrent.ScheduledThreadPoolExecutor TIMEOUTS=new java.util.concurrent.ScheduledThreadPoolExecutor(1,r->{var t=new Thread(r,"media-download-timeout");t.setDaemon(true);return t;});
     // Cancelled watchdogs would otherwise stay queued and hold their download stream.
@@ -76,8 +77,11 @@ public final class MediaDecoder {
         return (os.contains("win")?"windows":os.contains("mac")?"macosx":"linux")+"-"+cpu;
     }
     private static Path decoderFolder(Path cache){return cache.resolve("ffmpeg-"+VERSION+"-"+platform());}
-    /** Whether the first import still has to download the decoder. */
-    public static boolean decoderMissing(Path cache){return !Files.isRegularFile(decoderFolder(cache).resolve(MediaTools.MANIFEST));}
+    /** About how many megabytes of programs importing {@code source} still has to download, or 0 if it has them all. */
+    public static int downloadSize(String source,Path cache){
+        int size=Files.isRegularFile(decoderFolder(cache).resolve(MediaTools.MANIFEST))?0:DECODER_MB;
+        return YouTubeImport.matches(source)&&YouTubeImport.toolsMissing(cache)?size+YouTubeImport.TOOLS_MB:size;
+    }
     static Path decoder(Path cache,Consumer<String> status) throws Exception {
         if(ClientConfig.SPEC.isLoaded()&&!ClientConfig.MEDIA_TOOLS.get())throw new MediaImportException(MediaImportException.Reason.TOOLS_OFF,"Media tools are turned off in the client config.");
         String platform=platform();boolean windows=platform.startsWith("windows");

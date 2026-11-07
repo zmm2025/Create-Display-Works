@@ -39,7 +39,7 @@ public final class MediaScreen extends AbstractSimiScreen {
     private String sourceValue="";
     private Component status=Component.empty(),errorDetail,progress,errorHint=text("empty.check_source");
     private int cutoff=128,seconds=60,savedFrames,previewTicks,saveTicks,editorRetryTicks;
-    private boolean invert,dither,busy,dirty,fresh,playing=true,loop=true,saving;
+    private boolean invert,dither,busy,dirty,fresh,playing=true,loop=true,saving,asking,downloadApproved;
     private MediaDecoder.Scale scale=MediaDecoder.Scale.STRETCH;
     private Future<?> job;
 
@@ -96,10 +96,16 @@ public final class MediaScreen extends AbstractSimiScreen {
         control("status");
         if(savedFrames>0&&!requestedEditor&&original==null){requestedEditor=true;control("edit");}
     }
-    /** Says up front when importing will download programs, or can't because the player turned that off. */
-    private Component toolsNote(){
-        if(!ClientConfig.MEDIA_TOOLS.get())return text("empty.tools_off");
-        return MediaDecoder.decoderMissing(minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"))?text("empty.tools_download"):null;
+    private Path cache(){return minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache");}
+    /** Asks before the first import downloads programs. Stays this screen's session, so the server keeps it open behind the popup. */
+    private void askToDownload(int megabytes){
+        asking=true;
+        minecraft.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(yes->{
+            minecraft.setScreen(this);asking=false;downloadApproved=yes;
+            if(yes)importPreview();
+        },text("tools_prompt.title"),text("tools_prompt.message",megabytes),text("tools_prompt.download"),net.minecraft.network.chat.CommonComponents.GUI_CANCEL){
+            @Override public boolean isPauseScreen(){return false;}
+        });
     }
     private int footerY(){return video()?196:172;}
     private boolean video(){return original!=null?original.count()>1:fresh?preview!=null&&preview.count()>1:savedFrames>1;}
@@ -148,11 +154,13 @@ public final class MediaScreen extends AbstractSimiScreen {
     private void control(String action){PacketDistributor.sendToServer(new MediaNetwork.Control(pos,action));}
     public void importPreview(){
         if(busy||sourceValue.isBlank())return;
+        String input=sourceValue.strip();
+        if(!downloadApproved&&ClientConfig.MEDIA_TOOLS.get()){int size=MediaDecoder.downloadSize(input,cache());if(size>0){askToDownload(size);return;}}
         busy=true;status=text("status.loading");errorDetail=null;progress=null;syncControls();
-        String input=sourceValue.strip();int duration=60,threshold=cutoff;boolean inverted=invert,ordered=dither;var sizingMode=scale;
+        int duration=60,threshold=cutoff;boolean inverted=invert,ordered=dither;var sizingMode=scale;
         job=WORKER.submit(()->{
             try{
-                var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,minecraft.gameDirectory.toPath().resolve("create_display_works/media-cache"),
+                var clip=MediaDecoder.decode(input,columns,rows,duration,threshold,inverted,sizingMode,ordered,cache(),
                     step->minecraft.execute(()->{if(minecraft.screen==this&&busy)progress=text("progress."+step);}));
                 byte[] pixels=clip.editable()==null?null:clip.editable().pixels();
                 minecraft.execute(()->{if(minecraft.screen!=this)return;preview=clip;original=clip.editable();originalPixels=pixels;fresh=true;dirty=false;busy=false;playing=true;previewTicks=0;status=text("status.ready");init();setFocused(null);syncControls();});
@@ -267,7 +275,7 @@ public final class MediaScreen extends AbstractSimiScreen {
         if(++previewTicks>=count*2)previewTicks=loop?0:count*2-1;
     }
     // Tells the server the screen is closed, so its packets stop acting on this display until it's opened again.
-    @Override public void removed(){if(job!=null&&!job.isDone())job.cancel(true);if(minecraft.getConnection()!=null)control("close");}
+    @Override public void removed(){if(asking)return;if(job!=null&&!job.isDone())job.cancel(true);if(minecraft.getConnection()!=null)control("close");}
     private void well(GuiGraphics g,int x,int y,int w,int h){
         x+=guiLeft;y+=guiTop;g.fill(x-1,y-1,x+w+1,y+h+1,0xFF373737);g.fill(x,y,x+w,y+h,0xFF8B8B8B);g.fill(x,y+h,x+w+1,y+h+1,0xFFFFFFFF);g.fill(x+w,y,x+w+1,y+h+1,0xFFC6C6C6);
     }
@@ -315,9 +323,7 @@ public final class MediaScreen extends AbstractSimiScreen {
             for(int i=0;i<Math.min(3,lines.size());i++)g.drawCenteredString(font,lines.get(i),px+64,py+54+i*10,0xD3C6BA);
             return;
         }
-        if(preview==null){AllIcons.I_SCHEMATIC.render(g,px+56,py+27);g.drawCenteredString(font,text(errorDetail==null?"empty.title":"status.load_failed"),px+64,py+51,0xD3C6BA);g.drawCenteredString(font,errorDetail==null?text("empty.subtitle"):errorHint,px+64,py+63,0x999999);
-            if(errorDetail==null&&toolsNote()!=null){var lines=font.split(toolsNote(),pw-8);for(int i=0;i<Math.min(2,lines.size());i++)g.drawCenteredString(font,lines.get(i),px+64,py+74+i*9,0x999999);}
-            return;}
+        if(preview==null){AllIcons.I_SCHEMATIC.render(g,px+56,py+27);g.drawCenteredString(font,text(errorDetail==null?"empty.title":"status.load_failed"),px+64,py+51,0xD3C6BA);g.drawCenteredString(font,errorDetail==null?text("empty.subtitle"):errorHint,px+64,py+63,0x999999);return;}
         int w=columns*8,h=rows*8;float pixel=Math.min(pw/(float)w,ph/(float)h);int dw=Math.round(w*pixel),dh=Math.round(h*pixel);px+=(pw-dw)/2;py+=(ph-dh)/2;
         g.fill(px,py,px+dw,py+dh,0xFF000000|back);
         int count=original==null?preview.count():original.frameCount(settings());

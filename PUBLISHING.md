@@ -16,8 +16,8 @@ Use this text in both descriptions, and keep its versions and sizes up to date:
 > The first time you import media, this mod downloads [ffmpeg](https://ffmpeg.org) (about 30 MB, from Maven Central) to
 > convert it. The first YouTube link also downloads [yt-dlp](https://github.com/yt-dlp/yt-dlp) and
 > [Deno](https://deno.com) (about 60 MB, from their GitHub releases). Each download is checked against a pinned SHA-256
-> hash and saved in `create_display_works/media-cache` in your game folder. Nothing is downloaded until you import
-> something, dedicated servers never download them, and you can turn them off with the **Media Tools** setting.
+> hash and saved in `create_display_works/media-cache` in your game folder. The mod asks before each first download,
+> dedicated servers never download them, and you can turn them off with the **Media Tools** setting.
 
 ## Each release
 

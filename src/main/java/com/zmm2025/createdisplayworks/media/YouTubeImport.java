@@ -12,9 +12,20 @@ import java.util.zip.ZipInputStream;
 /** Public, finite YouTube videos only. Never reads browser cookies or user tool configuration. */
 final class YouTubeImport {
     private static final long LIMIT=100L*1024*1024;
+    private static final String YT_DLP="2026.08.19",DENO="2.9.7";
+    static final int TOOLS_MB=60;
     static boolean matches(String source) {
         try {String host=URI.create(source).getHost();return host!=null && Set.of("youtube.com","www.youtube.com","m.youtube.com","youtu.be","www.youtube-nocookie.com").contains(host.toLowerCase(Locale.ROOT));}
         catch(IllegalArgumentException e){return false;}
+    }
+    /** Whether a YouTube import still has to download yt-dlp or Deno. Each sealed folder holds a manifest once it's ready. */
+    static boolean toolsMissing(Path cache) {
+        for(String prefix:List.of("youtube-"+YT_DLP+"-","deno-"+DENO+"-")) {
+            try(var folders=Files.list(cache)) {
+                if(folders.noneMatch(f->f.getFileName().toString().startsWith(prefix)&&Files.isRegularFile(f.resolve(MediaTools.MANIFEST))))return true;
+            }catch(IOException e){return true;}
+        }
+        return false;
     }
     private static Path verified(Path cache,String name,String url,String digest,boolean zipped,Consumer<String> status) throws Exception {
         Path root=cache.resolve(name),exe=root.resolve(System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")?name.startsWith("deno")?"deno.exe":"yt-dlp.exe":name.startsWith("deno")?"deno":"yt-dlp");
@@ -71,8 +82,8 @@ final class YouTubeImport {
             case "x86_64-pc-windows-msvc"->"a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238";
             default->"c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490";
         };
-        Path yt=verified(cache,"youtube-2026.08.19-"+asset,"https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/"+asset,hash,false,status);
-        Path deno=verified(cache,"deno-2.9.7-"+platform,"https://github.com/denoland/deno/releases/download/v2.9.7/deno-"+platform+".zip",denoHash,true,status);
+        Path yt=verified(cache,"youtube-"+YT_DLP+"-"+asset,"https://github.com/yt-dlp/yt-dlp/releases/download/"+YT_DLP+"/"+asset,hash,false,status);
+        Path deno=verified(cache,"deno-"+DENO+"-"+platform,"https://github.com/denoland/deno/releases/download/v"+DENO+"/deno-"+platform+".zip",denoHash,true,status);
         var base=new ArrayList<>(List.of(yt.toString(),"--ignore-config","--no-playlist","--no-cache-dir","--no-progress","--no-warnings","--socket-timeout","20","--retries","2","--extractor-retries","2","--js-runtimes","deno:"+deno,"--ffmpeg-location",ffmpeg.toString()));
         var metadata=new ArrayList<>(base);metadata.addAll(List.of("--skip-download","--dump-single-json","--",source));
         status.accept("youtube_check");Path json=temp.resolve("youtube.json");run(metadata,temp,json,ffmpeg);
