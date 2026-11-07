@@ -20,7 +20,12 @@ import java.net.http.HttpResponse
 import java.net.http.WebSocket
 import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.nio.file.StandardOpenOption
@@ -376,16 +381,51 @@ class DevInstances {
             if (!owner.exists()) return
             File worktree = new File(owner.text.trim())
             if (new File(worktree, '.git').exists() || running(dir)) return
-            if (worktree.isDirectory() && worktree.deleteDir()) logger.lifecycle("Dev client: finished deleting removed worktree ${worktree}")
-            if (dir.deleteDir()) logger.lifecycle("Dev client: deleted the game folder of removed worktree ${worktree.name}")
+            if (worktree.isDirectory() && deleteTree(worktree)) logger.lifecycle("Dev client: finished deleting removed worktree ${worktree}")
+            if (deleteTree(dir)) logger.lifecycle("Dev client: deleted the game folder of removed worktree ${worktree.name}")
         }
+    }
+
+    /**
+     * Deletes a folder and everything in it, and returns whether it's gone. A junction or symbolic link inside it is
+     * deleted as a link: unlike File.deleteDir, this never deletes what a link points to.
+     */
+    static boolean deleteTree(File root) {
+        Path start = root.toPath()
+        if (!Files.exists(start, LinkOption.NOFOLLOW_LINKS)) return true
+        Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
+            @Override
+            FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                if (!attrs.isOther() && !attrs.isSymbolicLink()) return FileVisitResult.CONTINUE
+                try { Files.deleteIfExists(dir) } catch (IOException ignored) {}
+                return FileVisitResult.SKIP_SUBTREE
+            }
+
+            @Override
+            FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                try { Files.deleteIfExists(file) } catch (IOException ignored) {}
+                return FileVisitResult.CONTINUE
+            }
+
+            @Override
+            FileVisitResult visitFileFailed(Path file, IOException e) {
+                return FileVisitResult.CONTINUE
+            }
+
+            @Override
+            FileVisitResult postVisitDirectory(Path dir, IOException e) {
+                try { Files.deleteIfExists(dir) } catch (IOException ignored) {}
+                return FileVisitResult.CONTINUE
+            }
+        })
+        return !Files.exists(start, LinkOption.NOFOLLOW_LINKS)
     }
 
     /** Scratch captures in a game's folder only matter during the work that made them. */
     static void clearScratch(File gameDir) {
         long oldest = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(SCRATCH_DAYS)
         new File(gameDir, 'screenshots/dev-tools').listFiles()?.findAll { it.lastModified() < oldest }?.each { File old ->
-            if (old.isDirectory()) old.deleteDir() else old.delete()
+            deleteTree(old)
         }
     }
 

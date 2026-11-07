@@ -6,7 +6,6 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.zmm2025.createdisplayworks.CreateDisplayWorks;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
@@ -85,6 +84,10 @@ public final class DevServerControl {
     }
 
     private static void handle(HttpExchange exchange, MinecraftServer server) throws IOException {
+        if (!DevControlServer.fromLocalTool(exchange)) {
+            DevControlServer.refuse(exchange);
+            return;
+        }
         lastRequest = System.currentTimeMillis();
         JsonObject response;
         int code = 200;
@@ -119,12 +122,7 @@ public final class DevServerControl {
             response.addProperty("ok", false);
             response.addProperty("message", e.toString());
         }
-        byte[] bytes = response.toString().getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-        exchange.sendResponseHeaders(code, bytes.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(bytes);
-        }
+        DevControlServer.send(exchange, code, response);
     }
 
     private static JsonObject status(MinecraftServer server) {

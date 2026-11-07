@@ -34,7 +34,29 @@ final class DevControlServer {
         return server.getAddress().getPort();
     }
 
+    /**
+     * Whether a request comes from a local tool such as curl or Gradle, rather than from a web page. Browsers send an
+     * {@code Origin} header with every POST, and a page that rebinds its own domain to 127.0.0.1 still sends its own
+     * name as the {@code Host}. Without this check, any open web page could run commands in the game.
+     */
+    static boolean fromLocalTool(HttpExchange exchange) {
+        if (exchange.getRequestHeaders().containsKey("Origin")) return false;
+        String host = exchange.getRequestHeaders().getFirst("Host");
+        if (host == null) return true;
+        String name = host.startsWith("[") ? host.substring(0, host.indexOf(']') + 1) : host.split(":", 2)[0];
+        return name.equals("127.0.0.1") || name.equalsIgnoreCase("localhost") || name.equals("[::1]");
+    }
+
+    /** Answers a request that didn't come from a local tool. */
+    static void refuse(HttpExchange exchange) throws IOException {
+        send(exchange, 403, DevTools.failure("Only local tools may use this API, not web pages."));
+    }
+
     private static void handle(HttpExchange exchange) throws IOException {
+        if (!fromLocalTool(exchange)) {
+            refuse(exchange);
+            return;
+        }
         JsonObject response;
         int code = 200;
         DevInstance.touch();
@@ -52,6 +74,10 @@ final class DevControlServer {
             code = 500;
             response = DevTools.failure(e.toString());
         }
+        send(exchange, code, response);
+    }
+
+    static void send(HttpExchange exchange, int code, JsonObject response) throws IOException {
         byte[] bytes = response.toString().getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         exchange.sendResponseHeaders(code, bytes.length);

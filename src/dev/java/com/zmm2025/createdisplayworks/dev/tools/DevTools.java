@@ -599,6 +599,14 @@ public final class DevTools {
             pending.result.get(30 + (long) frames * intervalMs / 1000, TimeUnit.SECONDS);
         } finally {
             recording = audio ? DevAudio.stop() : null;
+            // A capture that timed out, for example because the window is minimized, would otherwise stay pending and
+            // keep the HUD hidden.
+            if (!pending.result.isDone())
+                minecraft.execute(() -> {
+                    if (screenshot != pending) return;
+                    screenshot = null;
+                    minecraft.options.hideGui = pending.hideGuiBefore;
+                });
         }
         JsonObject response = new JsonObject();
         response.addProperty("ok", true);
