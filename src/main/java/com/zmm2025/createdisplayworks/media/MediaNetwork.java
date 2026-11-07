@@ -21,6 +21,12 @@ public final class MediaNetwork {
     private static final Map<UUID,Upload> UPLOADS=new HashMap<>();
     private static final Map<UUID,Long> EDIT_REQUESTS=new HashMap<>();
     private static final Map<UUID,Long> IMPORT_REQUESTS=new HashMap<>();
+    /**
+     * The display whose media screen the server opened for each player. The screen's packets only act on that display,
+     * so protection that stops a player right-clicking it, such as a land claim, also stops a modified client.
+     */
+    private static final Map<UUID,Session> SESSIONS=new HashMap<>();
+    private record Session(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension,BlockPos pos){}
     /** Status messages are lang keys, so the client shows them in its own language. */
     public static final String SAVED=message("saved");
     private static String message(String name){return "message."+CreateDisplayWorks.MOD_ID+".media."+name;}
@@ -29,10 +35,10 @@ public final class MediaNetwork {
     private static final long TRANSFER_IDLE_NANOS=30_000_000_000L;
     public static void registerLifecycle(){
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent e)->{
-            UUID id=e.getEntity().getUUID();UPLOADS.remove(id);EDIT_REQUESTS.remove(id);IMPORT_REQUESTS.remove(id);TRANSFERS.remove(id);
+            UUID id=e.getEntity().getUUID();endSession(id);EDIT_REQUESTS.remove(id);IMPORT_REQUESTS.remove(id);
         });
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStoppedEvent e)->{
-            UPLOADS.clear();EDIT_REQUESTS.clear();IMPORT_REQUESTS.clear();TRANSFERS.clear();
+            SESSIONS.clear();UPLOADS.clear();EDIT_REQUESTS.clear();IMPORT_REQUESTS.clear();TRANSFERS.clear();
         });
         net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.tick.ServerTickEvent.Post e)->{
             if(e.getServer().getTickCount()%20==0){
@@ -45,6 +51,14 @@ public final class MediaNetwork {
         if(previous!=0&&now-previous<1_000_000_000L)return false;
         requests.put(player.getUUID(),now);return true;
     }
+    /** Opens the media screen for a display the player just right-clicked, which lets the screen's packets act on it. */
+    public static void open(ServerPlayer player,BlockPos pos,FlipDotAssembly group){
+        SESSIONS.put(player.getUUID(),new Session(player.level().dimension(),pos.immutable()));
+        var controller=group.controller();
+        PacketDistributor.sendToPlayer(player,new Open(pos,group.width(),group.height(),controller.mediaFilename(),controller.mediaThumbnail(),
+            controller.mediaFrameCount(),controller.mediaPlaybackEnabled(),controller.mediaLoops()));
+    }
+    private static void endSession(UUID player){SESSIONS.remove(player);UPLOADS.remove(player);TRANSFERS.remove(player);}
     private static void reject(ServerPlayer player,BlockPos pos,String message){
         UPLOADS.remove(player.getUUID());
         PacketDistributor.sendToPlayer(player,new Status(pos,message,true));
@@ -104,6 +118,7 @@ public final class MediaNetwork {
             if(transfer.acked==transfer.data.length)TRANSFERS.remove(c.player().getUUID());else pump(transfer,(ServerPlayer)c.player());
         });
         registrar.playToServer(Control.TYPE,Control.CODEC,(p,c)->{
+            if(p.action.equals("close")){var session=SESSIONS.get(c.player().getUUID());if(session!=null&&session.pos.equals(p.pos))endSession(c.player().getUUID());return;}
             var be=editable((ServerPlayer)c.player(),p.pos);if(be==null)return;var group=be.assembly();if(group==null)return;
             if(p.action.equals("edit")){if(!allow(EDIT_REQUESTS,(ServerPlayer)c.player())){
                 PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,"",true,-2,false));return;
@@ -115,10 +130,14 @@ public final class MediaNetwork {
             PacketDistributor.sendToPlayer((ServerPlayer)c.player(),new Status(p.pos,"",group.controller().mediaLoops(),group.controller().mediaFrameCount(),group.controller().mediaPlaybackEnabled()));
         });
     }
+    /** The display at {@code pos}, if its media screen is open for this player and the player may still use it. */
     private static FlipDotBlockEntity editable(ServerPlayer player,BlockPos pos) {
+        var session=SESSIONS.get(player.getUUID());
+        if(session==null||!session.pos.equals(pos)||session.dimension!=player.level().dimension())return null;
         if(!player.mayBuild() || player.isSpectator() || player.distanceToSqr(pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5)>64
-            || !player.level().hasChunkAt(pos) || !player.level().mayInteract(player,pos))return null;
-        return player.level().getBlockEntity(pos) instanceof FlipDotBlockEntity be?be:null;
+            || !player.level().hasChunkAt(pos) || !player.level().mayInteract(player,pos)
+            || !(player.level().getBlockEntity(pos) instanceof FlipDotBlockEntity be)){endSession(player.getUUID());return null;}
+        return be;
     }
     private static void receive(Part p,ServerPlayer player) {
         UPLOADS.values().removeIf(u->u.expires<System.nanoTime());

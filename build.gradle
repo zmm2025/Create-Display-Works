@@ -126,6 +126,10 @@ dependencies {
     implementation jarJar("com.github.weisj:jsvg:2.0.0")
     ['imageio-core','imageio-metadata','imageio-webp'].each { implementation jarJar("com.twelvemonkeys.imageio:${it}:3.15.2") }
     ['common-lang','common-io','common-image'].each { implementation jarJar("com.twelvemonkeys.common:${it}:3.15.2") }
+    // Release jars load these through jarJar. Dev runs only see mods, so plain libraries need adding there too.
+    additionalRuntimeClasspath "com.github.weisj:jsvg:2.0.0"
+    ['imageio-core','imageio-metadata','imageio-webp'].each { additionalRuntimeClasspath "com.twelvemonkeys.imageio:${it}:3.15.2" }
+    ['common-lang','common-io','common-image'].each { additionalRuntimeClasspath "com.twelvemonkeys.common:${it}:3.15.2" }
     testImplementation 'com.google.code.gson:gson:2.10.1'
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
