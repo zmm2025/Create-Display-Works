@@ -3,6 +3,7 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.143'
     id 'com.gorylenko.gradle-git-properties' version '4.0.1'
     id 'idea'
+    id 'com.diffplug.spotless' version '8.9.0'
 }
 
 tasks.named('wrapper', Wrapper).configure {
@@ -202,6 +203,18 @@ neoForge.ideSyncTask generateModMetadata
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+    // Format first when both run, so the compiler sees the formatted sources.
+    mustRunAfter 'spotlessApply'
+}
+
+// Formatting. `./gradlew build` fails on unformatted code, `./gradlew spotlessApply` fixes it, and devReload runs
+// spotlessApply first, so code an agent leaves behind is already formatted.
+spotless {
+    java {
+        target 'src/*/java/**/*.java'
+        palantirJavaFormat('2.102.0')
+        formatAnnotations()
+    }
 }
 
 // IDEA no longer automatically downloads sources/javadoc jars for dependencies, so we need to explicitly enable the behavior.

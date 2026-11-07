@@ -879,8 +879,8 @@ abstract class DevReloadTask extends DefaultTask {
 
 tasks.register('devReload', DevReloadTask) {
     group = 'dev'
-    description = "Compiles and hot-reloads code, assets and data into this checkout's running dev client. -Pfull reloads everything."
-    dependsOn 'classes', 'devClasses'
+    description = "Formats, compiles and hot-reloads code, assets and data into this checkout's running dev client. -Pfull reloads everything."
+    dependsOn 'spotlessApply', 'classes', 'devClasses'
     gameDirectory = devInstanceDir.absolutePath
     runDirectory = devRunDir.absolutePath
     defaultPort = devIsWorktree ? '' : devControlPort

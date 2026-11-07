@@ -1,23 +1,27 @@
 package com.zmm2025.createdisplayworks;
 
-import net.neoforged.fml.common.Mod;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import com.simibubi.create.api.behaviour.display.DisplayTarget;
+import com.zmm2025.createdisplayworks.media.MediaLimits;
+import com.zmm2025.createdisplayworks.media.MediaNetwork;
+import com.zmm2025.createdisplayworks.media.MediaStore;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 
 @Mod(CreateDisplayWorks.MOD_ID)
-public final class CreateDisplayWorks
-{
+public final class CreateDisplayWorks {
     public static final String MOD_ID = "create_display_works";
 
-    public CreateDisplayWorks(IEventBus bus, net.neoforged.fml.ModContainer container) {
+    public CreateDisplayWorks(IEventBus bus, ModContainer container) {
         ModContent.register(bus);
-        com.zmm2025.createdisplayworks.media.MediaNetwork.registerLifecycle();
-        com.zmm2025.createdisplayworks.media.MediaStore.registerLifecycle();
-        container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER,com.zmm2025.createdisplayworks.media.MediaLimits.SPEC);
-        container.registerConfig(net.neoforged.fml.config.ModConfig.Type.CLIENT,ClientConfig.SPEC);
+        MediaNetwork.registerLifecycle();
+        MediaStore.registerLifecycle();
+        container.registerConfig(ModConfig.Type.SERVER, MediaLimits.SPEC);
+        container.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
         bus.addListener(this::setup);
-        bus.addListener(com.zmm2025.createdisplayworks.media.MediaNetwork::register);
+        bus.addListener(MediaNetwork::register);
     }
 
     private void setup(FMLCommonSetupEvent event) {
