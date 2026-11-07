@@ -25,7 +25,7 @@ final class DevCamera {
     static JsonObject camera(Map<String, String> query) throws Exception {
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
-        if(server == null || minecraft.player == null) return DevTools.failure("Not in a single-player world.");
+        if(server == null || minecraft.player == null) return DevTools.failure("Not in a single-player world; on a server, use /command and /look.");
         if(!query.containsKey("x") || !query.containsKey("y") || !query.containsKey("z")) return DevTools.failure("Pass x, y and z.");
         Vec3 target = new Vec3(coordinate(query.get("x")), coordinate(query.get("y")), coordinate(query.get("z")));
         Direction face;
@@ -56,7 +56,7 @@ final class DevCamera {
         while(System.nanoTime() < deadline && minecraft.submit(() -> minecraft.player.position().distanceTo(feet) > 0.05).get(1, TimeUnit.MINUTES)) Thread.sleep(10);
 
         JsonObject response = query.containsKey("screenshot") && !"false".equals(query.get("screenshot"))
-            ? DevTools.screenshot(!"false".equals(query.get("hud")), 1, 0, null) : DevTools.ok();
+            ? DevTools.screenshot(!"false".equals(query.get("hud")), 1, 0, null, query.get("keep"), false) : DevTools.ok();
         response.addProperty("face", face.getName());
         response.addProperty("distance", DevTools.round(distance));
         response.addProperty("eye", DevTools.round(eye.x) + " " + DevTools.round(eye.y) + " " + DevTools.round(eye.z));

@@ -5,19 +5,17 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
-import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.platform.Window;
 import com.zmm2025.createdisplayworks.CreateDisplayWorks;
-import com.zmm2025.createdisplayworks.dev.mixin.MouseHandlerAccessor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
+import net.minecraft.client.GuiMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.tutorial.TutorialSteps;
-import net.minecraft.commands.CommandSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -34,6 +32,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.ClientCommandHandler;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderFrameEvent;
@@ -49,6 +48,7 @@ import java.lang.instrument.Instrumentation;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -84,6 +84,8 @@ public final class DevTools {
     private static final int MAX_UNSAVED_FRAMES = 32;
     /** Frames shown on a contact sheet; longer sequences show evenly spread frames. */
     private static final int SHEET_FRAMES = 36;
+    /** How long a command sent to a remote server gets to answer. */
+    private static final int REMOTE_COMMAND_TICKS = 6;
     /** Which worktree and branch this client runs; shown in the window title. */
     private static final String LABEL = System.getProperty("createdisplayworks.dev.label", "dev client");
     private static FileChannel clientLock;
@@ -91,6 +93,11 @@ public final class DevTools {
     private static Object titledScreen, titledLevel;
 
     private DevTools() {}
+
+    /** A step that may fail, run on the control API's thread. */
+    interface Action {
+        JsonObject run() throws Exception;
+    }
 
     @SubscribeEvent public static void setup(FMLClientSetupEvent event) {
         if(!ENABLED) return;
@@ -120,6 +127,7 @@ public final class DevTools {
     @SubscribeEvent public static void clientTick(ClientTickEvent.Post event) {
         if(!ENABLED) return;
         DevInstance.tick();
+        DevInput.tick();
         Minecraft minecraft = Minecraft.getInstance();
         if(titled && minecraft.screen == titledScreen && minecraft.level == titledLevel) return;
         titled = true;
@@ -135,6 +143,11 @@ public final class DevTools {
             .append(Component.literal("Running " + LABEL).withStyle(ChatFormatting.GRAY)));
     }
 
+    /** Held input would otherwise carry over into the next world. */
+    @SubscribeEvent public static void loggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        if(ENABLED) DevInput.releaseAll();
+    }
+
     @SubscribeEvent public static void screenOpened(ScreenEvent.Opening event) {
         if(ENABLED && event.getNewScreen() instanceof TitleScreen) DevWorld.titleScreenOpened();
     }
@@ -147,6 +160,7 @@ public final class DevTools {
         if(!ENABLED) return;
         DevInspect.frameRendered();
         DevPerf.frameRendered();
+        DevRecorder.frameRendered();
         PendingScreenshot pending = screenshot;
         if(pending == null || pending.framesToWait-- > 0) return;
         long now = System.nanoTime();
@@ -246,6 +260,7 @@ public final class DevTools {
             status.addProperty("gameDirectory", minecraft.gameDirectory.toPath().toAbsolutePath().normalize().toString());
             MinecraftServer server = minecraft.getSingleplayerServer();
             status.addProperty("world", server == null ? null : server.getWorldData().getLevelName());
+            if(server == null && minecraft.getCurrentServer() != null) status.addProperty("server", minecraft.getCurrentServer().ip);
             status.addProperty("screen", minecraft.screen == null ? null : minecraft.screen.getClass().getName());
             status.addProperty("fps", minecraft.getFps());
             status.addProperty("hidden", DevInstance.hidden());
@@ -255,6 +270,8 @@ public final class DevTools {
             windowJson.addProperty("height", window.getHeight());
             windowJson.addProperty("guiScale", window.getGuiScale());
             status.add("window", windowJson);
+            status.add("held", DevInput.held());
+            status.addProperty("evidenceDirectory", slashes(evidenceDirectory()));
             if(minecraft.player != null) {
                 JsonObject player = new JsonObject();
                 player.addProperty("name", minecraft.player.getGameProfile().getName());
@@ -264,6 +281,7 @@ public final class DevTools {
                 player.addProperty("yaw", round(minecraft.player.getYRot()));
                 player.addProperty("pitch", round(minecraft.player.getXRot()));
                 player.addProperty("dimension", minecraft.player.level().dimension().location().toString());
+                player.addProperty("sneaking", minecraft.player.isShiftKeyDown());
                 player.addProperty("gameMode", minecraft.gameMode == null ? null : minecraft.gameMode.getPlayerMode().getName());
                 player.addProperty("mainHand", BuiltInRegistries.ITEM.getKey(minecraft.player.getMainHandItem().getItem()) + " x" + minecraft.player.getMainHandItem().getCount());
                 player.addProperty("selectedSlot", minecraft.player.getInventory().selected);
@@ -285,10 +303,7 @@ public final class DevTools {
         List<JsonElement> steps = new ArrayList<>();
         if(batch) JsonParser.parseString(body).getAsJsonArray().forEach(steps::add);
         else steps.add(new JsonPrimitive(body));
-        Minecraft minecraft = Minecraft.getInstance();
-        MinecraftServer server = minecraft.getSingleplayerServer();
-        if(server == null || minecraft.player == null) return failure("Not in a single-player world.");
-        UUID id = minecraft.player.getUUID();
+        if(Minecraft.getInstance().player == null) return failure("Not in a world.");
         JsonArray results = new JsonArray();
         boolean ok = true;
         for(int i = 0; i < steps.size(); i++) {
@@ -297,7 +312,7 @@ public final class DevTools {
                 List<String> commands = new ArrayList<>();
                 for(; i < steps.size() && steps.get(i).isJsonPrimitive(); i++) commands.add(steps.get(i).getAsString());
                 i--;
-                for(JsonObject result : runCommands(server, id, commands, batch)) {
+                for(JsonObject result : runCommands(commands, batch)) {
                     ok &= result.get("ok").getAsBoolean();
                     results.add(result);
                 }
@@ -306,23 +321,28 @@ public final class DevTools {
             JsonObject wait = step.getAsJsonObject(), result = new JsonObject();
             if(wait.has("waitTicks")) {
                 int ticks = wait.get("waitTicks").getAsInt();
-                waitTicks(server, ticks);
+                waitTicks(ticks);
                 result.addProperty("waitTicks", ticks);
                 result.addProperty("ok", true);
+            } else if(wait.has("call")) {
+                JsonObject called = DevControlServer.call(wait.get("call").getAsString(), wait.has("body") ? wait.get("body").getAsString() : "");
+                result.addProperty("call", wait.get("call").getAsString());
+                result.addProperty("ok", called.get("ok").getAsBoolean());
+                result.add("result", called);
             } else if(wait.has("waitUntil")) {
                 String command = wait.get("waitUntil").getAsString();
                 int timeout = wait.has("timeoutTicks") ? wait.get("timeoutTicks").getAsInt() : 200, waited = 0;
-                JsonObject attempt = runCommands(server, id, List.of(command), false).get(0);
+                JsonObject attempt = runCommands(List.of(command), false).get(0);
                 while(!attempt.get("ok").getAsBoolean() && waited < timeout) {
-                    waitTicks(server, 1);
+                    waitTicks(1);
                     waited++;
-                    attempt = runCommands(server, id, List.of(command), false).get(0);
+                    attempt = runCommands(List.of(command), false).get(0);
                 }
                 result.addProperty("waitUntil", command);
                 result.addProperty("ok", attempt.get("ok").getAsBoolean());
                 result.addProperty("ticks", waited);
                 result.add("output", attempt.get("output"));
-            } else throw new IllegalArgumentException("Unknown step " + wait + "; use a command, waitTicks or waitUntil.");
+            } else throw new IllegalArgumentException("Unknown step " + wait + "; use a command, waitTicks, waitUntil or call.");
             results.add(result);
             if(!result.get("ok").getAsBoolean()) {
                 ok = false;
@@ -337,46 +357,114 @@ public final class DevTools {
         return response;
     }
 
-    private static List<JsonObject> runCommands(MinecraftServer server, UUID id, List<String> commands, boolean echo) throws Exception {
+    /** Runs client commands, such as Flywheel's, on the client, and the rest on the server, keeping their order. */
+    private static List<JsonObject> runCommands(List<String> commands, boolean echo) throws Exception {
+        List<JsonObject> done = new ArrayList<>();
+        List<String> forServer = new ArrayList<>();
+        for(String command : commands) {
+            String text = command.strip().startsWith("/") ? command.strip().substring(1) : command.strip();
+            if(!isClientCommand(text)) {
+                forServer.add(text);
+                continue;
+            }
+            done.addAll(runServerCommands(forServer, echo));
+            forServer.clear();
+            JsonObject result = runClientCommand(text, echo);
+            if(result != null) done.add(result);
+            else forServer.add(text);
+        }
+        done.addAll(runServerCommands(forServer, echo));
+        return done;
+    }
+
+    private static boolean isClientCommand(String text) {
+        var dispatcher = ClientCommandHandler.getDispatcher();
+        return dispatcher != null && dispatcher.getRoot().getChild(text.split(" ", 2)[0]) != null;
+    }
+
+    /** Runs a client command and reports what it printed, or returns null if it turns out to be for the server. */
+    private static JsonObject runClientCommand(String text, boolean echo) throws Exception {
+        return onClient(() -> {
+            GuiMessage mark = DevScreens.newest();
+            return ClientCommandHandler.runCommand(text) ? chatResult(text, echo, mark) : null;
+        });
+    }
+
+    /** Reports the chat messages added since {@code mark} as a command's output; failures show in red. */
+    private static JsonObject chatResult(String text, boolean echo, GuiMessage mark) {
+        List<Component> added = DevScreens.since(mark);
+        JsonObject response = new JsonObject();
+        if(echo) response.addProperty("command", text);
+        response.addProperty("ok", added.stream().noneMatch(DevScreens::failed));
+        response.add("output", strings(added.stream().map(Component::getString).toList()));
+        return response;
+    }
+
+    private static List<JsonObject> runServerCommands(List<String> commands, boolean echo) throws Exception {
+        if(commands.isEmpty()) return List.of();
+        Minecraft minecraft = Minecraft.getInstance();
+        MinecraftServer server = minecraft.getSingleplayerServer();
+        List<JsonObject> done = new ArrayList<>();
+        if(server == null) {
+            for(String text : commands) done.add(runRemoteCommand(text, echo));
+            return done;
+        }
+        UUID id = minecraft.player.getUUID();
         return server.submit(() -> {
             ServerPlayer player = server.getPlayerList().getPlayer(id);
-            List<JsonObject> done = new ArrayList<>();
-            for(String command : commands) done.add(runCommand(server, player, command, echo));
+            for(String command : commands) {
+                long start = System.nanoTime();
+                done.add(runCommand(server, player, command, echo));
+                DevRecorder.log("/" + command, (System.nanoTime() - start) / 1_000_000);
+            }
             return done;
         }).get(1, TimeUnit.MINUTES);
     }
 
-    /** Blocks until the server has run {@code ticks} more ticks. */
-    private static void waitTicks(MinecraftServer server, int ticks) throws Exception {
+    /**
+     * Sends a command to a remote server as the player would, with the player's own permissions, and reports the chat
+     * it answers with. Nothing tells the client when a command is done, so this waits a moment for the answer.
+     */
+    private static JsonObject runRemoteCommand(String text, boolean echo) throws Exception {
+        GuiMessage mark = onClient(() -> {
+            GuiMessage newest = DevScreens.newest();
+            Minecraft.getInstance().player.connection.sendCommand(text);
+            return newest;
+        });
+        DevInput.waitClientTicks(REMOTE_COMMAND_TICKS);
+        return onClient(() -> chatResult(text, echo, mark));
+    }
+
+    /** Blocks for {@code ticks} ticks of the integrated server, or of the client on a remote server or while paused. */
+    private static void waitTicks(int ticks) throws Exception {
+        Minecraft minecraft = Minecraft.getInstance();
+        MinecraftServer server = minecraft.getSingleplayerServer();
+        if(server == null || minecraft.isPaused()) {
+            DevInput.waitClientTicks(ticks);
+            return;
+        }
         if(ticks < 0 || ticks > 1200) throw new IllegalArgumentException("Wait 0-1200 ticks.");
         int target = server.submit(server::getTickCount).get(1, TimeUnit.MINUTES) + ticks;
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(5_000 + ticks * 250L);
         while(server.getTickCount() < target) {
-            if(System.nanoTime() > deadline) throw new IllegalStateException("The server stopped ticking; is the game paused or frozen with /tick freeze?");
+            // A pausing screen, such as Ponder's, can open during the wait.
+            if(minecraft.isPaused()) {
+                DevInput.waitClientTicks(target - server.getTickCount());
+                return;
+            }
+            if(System.nanoTime() > deadline) throw new IllegalStateException("The server stopped ticking. Is the pause menu open, or is the game frozen with /tick freeze?");
             Thread.sleep(5);
         }
     }
 
-    private static JsonObject runCommand(MinecraftServer server, ServerPlayer player, String command, boolean echo) {
-        String text = command.strip().startsWith("/") ? command.strip().substring(1) : command.strip();
+    private static JsonObject runCommand(MinecraftServer server, ServerPlayer player, String text, boolean echo) {
         // A player who isn't flying falls after a teleport, which spoils the view it was meant to set up.
         if(text.startsWith("tp ") || text.startsWith("teleport ")) DevCamera.keepFlying(player);
-        List<String> output = new ArrayList<>();
-        boolean[] success = {false};
-        int[] value = {0};
-        CommandSource sink = new CommandSource() {
-            @Override public void sendSystemMessage(Component message) { output.add(message.getString()); }
-            @Override public boolean acceptsSuccess() { return true; }
-            @Override public boolean acceptsFailure() { return true; }
-            @Override public boolean shouldInformAdmins() { return false; }
-        };
-        server.getCommands().performPrefixedCommand(player.createCommandSourceStack().withSource(sink).withPermission(4)
-            .withCallback((ok, result) -> { success[0] |= ok; value[0] = result; }), text);
+        JsonObject result = DevPlayers.run(server, player.createCommandSourceStack().withPermission(4), text);
+        if(!echo) return result;
         JsonObject response = new JsonObject();
-        if(echo) response.addProperty("command", text);
-        response.addProperty("ok", success[0]);
-        response.addProperty("result", value[0]);
-        response.add("output", strings(output));
+        response.addProperty("command", text);
+        result.entrySet().forEach(entry -> response.add(entry.getKey(), entry.getValue()));
         return response;
     }
 
@@ -384,11 +472,13 @@ public final class DevTools {
      * Captures one frame, or a sequence of {@code frames} taken {@code intervalMs} apart for checking motion. A sequence
      * also gets a contact sheet, up to 36 evenly spread frames in one image, left to right then top to bottom, and
      * optionally a {@code video} (mp4 or gif) that plays at the speed the frames were captured. Without the HUD, an
-     * open chat is closed first; any other open screen is named in {@code screen}, since it still shows.
+     * open chat is closed first; any other open screen is named in {@code screen}, since it still shows. {@code keep}
+     * also copies the result, under that name, to the evidence folder. {@code audio} records the game's sound into an MP4.
      */
-    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video) throws Exception {
+    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video, String keep, boolean audio) throws Exception {
         if(frames < 1 || frames > 600 || intervalMs < 0 || intervalMs > 10_000) return failure("Use 1-600 frames and an interval of 0-10000 ms.");
         if(video != null && frames < 2) return failure("A video needs at least 2 frames.");
+        if(audio && !"mp4".equalsIgnoreCase(video)) return failure("Sound needs video=mp4; a GIF has no soundtrack.");
         Minecraft minecraft = Minecraft.getInstance();
         String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS"));
         Path folder = minecraft.gameDirectory.toPath().resolve("screenshots/dev-tools").toAbsolutePath().normalize();
@@ -396,6 +486,7 @@ public final class DevTools {
         if(frames == 1) files.add(folder.resolve(name + ".png"));
         else for(int i = 0; i < frames; i++) files.add(folder.resolve(name).resolve(String.format("frame-%03d.png", i)));
         PendingScreenshot pending = new PendingScreenshot(files, intervalMs * 1_000_000L);
+        long audioStart = audio ? DevAudio.start() : 0;
         String screen = minecraft.submit(() -> {
             if(!hud && minecraft.screen instanceof ChatScreen) minecraft.setScreen(null);
             pending.hideGuiBefore = minecraft.options.hideGui;
@@ -403,12 +494,18 @@ public final class DevTools {
             screenshot = pending;
             return minecraft.screen == null ? null : minecraft.screen.getClass().getSimpleName();
         }).get(1, TimeUnit.MINUTES);
-        pending.result.get(30 + (long)frames * intervalMs / 1000, TimeUnit.SECONDS);
+        Path recording;
+        try {
+            pending.result.get(30 + (long)frames * intervalMs / 1000, TimeUnit.SECONDS);
+        } finally {
+            recording = audio ? DevAudio.stop() : null;
+        }
         JsonObject response = new JsonObject();
         response.addProperty("ok", true);
         if(screen != null) response.addProperty("screen", screen);
         if(frames == 1) {
             response.addProperty("path", files.get(0).toString());
+            if(keep != null) keep(keep, List.of(files.get(0)), response);
             return response;
         }
         List<Integer> sheetFrames = new ArrayList<>();
@@ -427,12 +524,52 @@ public final class DevTools {
         response.add("gameTimes", gameTimes);
         if(video != null) {
             try {
-                response.addProperty("video", DevVideo.encode(files, pending.times, video).toString());
+                response.addProperty("video", DevVideo.encode(files, pending.times, video, recording, (pending.start - audioStart) / 1e9).toString());
             } catch(IOException | IllegalArgumentException e) {
                 response.addProperty("videoError", e.getMessage());
             }
         }
+        if(keep != null) {
+            List<Path> kept = new ArrayList<>();
+            if(response.has("video")) kept.add(Path.of(response.get("video").getAsString()));
+            kept.add(Path.of(response.get("sheet").getAsString()));
+            keep(keep, kept, response);
+        }
         return response;
+    }
+
+    /**
+     * Where images shown in chat live. Chat embeds a file by its path and reads it from disk each time it's displayed,
+     * so a deleted file shows up broken. This folder is outside the worktree and its game folder, which both go away
+     * when the worktree is removed.
+     */
+    static Path evidenceDirectory() {
+        Path game = Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize();
+        return DevInstance.WORKTREE_INSTANCE ? game.getParent().getParent().resolve("evidence").resolve(game.getFileName()) : game.resolve("evidence").resolve("main");
+    }
+
+    /** Copies a capture to the evidence folder, never over an earlier one, since chat may already show that file. */
+    static void keep(String label, List<Path> captures, JsonObject response) throws IOException {
+        Path folder = evidenceDirectory();
+        Files.createDirectories(folder);
+        String name = label.replaceAll("[^a-zA-Z0-9._-]", "-");
+        JsonArray kept = new JsonArray(), markdown = new JsonArray();
+        for(Path capture : captures) {
+            String file = capture.getFileName().toString(), extension = file.substring(file.lastIndexOf('.'));
+            String suffix = file.startsWith("sheet.") && captures.size() > 1 ? "-sheet" : "";
+            Path target = folder.resolve(name + suffix + extension);
+            for(int i = 2; Files.exists(target); i++) target = folder.resolve(name + suffix + "-" + i + extension);
+            Files.copy(capture, target, StandardCopyOption.COPY_ATTRIBUTES);
+            kept.add(slashes(target));
+            markdown.add("![" + label + "](" + slashes(target) + ")");
+        }
+        response.add("kept", kept);
+        response.add("markdown", markdown);
+    }
+
+    /** Forward slashes, which Markdown leaves alone. */
+    private static String slashes(Path path) {
+        return path.toString().replace('\\', '/');
     }
 
     /**
@@ -468,11 +605,16 @@ public final class DevTools {
 
     /** Right-clicks (use) or left-clicks (attack) the crosshair target, or the given block face when coordinates are passed. */
     static JsonObject interact(boolean use, Map<String, String> query) throws Exception {
-        return onClient(() -> {
+        DevInput.awaitHeld(query.get("holding"));
+        return DevInput.withModifiers(query.get("mods"), () -> onClient(() -> {
             Minecraft minecraft = Minecraft.getInstance();
             if(minecraft.player == null || minecraft.gameMode == null) return failure("Not in a world.");
             HitResult target = minecraft.hitResult;
-            if(query.containsKey("x")) {
+            if(query.containsKey("entity")) {
+                var entity = minecraft.level.getEntity(Integer.parseInt(query.get("entity")));
+                if(entity == null) return failure("No entity with that id is loaded.");
+                target = new EntityHitResult(entity, entity.getBoundingBox().getCenter());
+            } else if(query.containsKey("x")) {
                 BlockPos pos = new BlockPos(Integer.parseInt(query.get("x")), Integer.parseInt(query.get("y")), Integer.parseInt(query.get("z")));
                 Direction face = Direction.byName(query.getOrDefault("face", "up"));
                 if(face == null) return failure("Unknown face; use up, down, north, south, east or west.");
@@ -483,7 +625,12 @@ public final class DevTools {
             if(use) {
                 InteractionResult result = switch(target == null ? HitResult.Type.MISS : target.getType()) {
                     case BLOCK -> minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, (BlockHitResult)target);
-                    case ENTITY -> minecraft.gameMode.interact(player, ((EntityHitResult)target).getEntity(), InteractionHand.MAIN_HAND);
+                    case ENTITY -> {
+                        // In this order, as a real click does; armor stands and others only answer the first.
+                        EntityHitResult hit = (EntityHitResult)target;
+                        InteractionResult at = minecraft.gameMode.interactAt(player, hit.getEntity(), hit, InteractionHand.MAIN_HAND);
+                        yield at.consumesAction() ? at : minecraft.gameMode.interact(player, hit.getEntity(), InteractionHand.MAIN_HAND);
+                    }
                     case MISS -> InteractionResult.PASS;
                 };
                 if(!result.consumesAction()) result = minecraft.gameMode.useItem(player, InteractionHand.MAIN_HAND);
@@ -500,65 +647,7 @@ public final class DevTools {
             response.addProperty("result", outcome);
             response.add("target", describe(target));
             return response;
-        });
-    }
-
-    /** Presses a key (GLFW name such as {@code escape}, {@code e}, {@code enter}) in the open screen, or as a game keybind. */
-    /** {@code mods} lists held modifiers, such as {@code shortcut} (Cmd on macOS, Ctrl elsewhere), {@code shift}, {@code alt}. */
-    static JsonObject key(String name, String mods) throws Exception {
-        InputConstants.Key key = InputConstants.getKey("key.keyboard." + name.toLowerCase(Locale.ROOT));
-        if(key == InputConstants.UNKNOWN) return failure("Unknown key " + name + "; use GLFW names like escape, enter, e, left.shift, f3.");
-        int modifiers = 0;
-        for(String mod : mods == null || mods.isBlank() ? new String[0] : mods.toLowerCase(Locale.ROOT).split(",")) {
-            switch(mod.strip()) {
-                case "shortcut" -> modifiers |= Minecraft.ON_OSX ? org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER : org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
-                case "ctrl", "control" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL;
-                case "super", "cmd" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SUPER;
-                case "shift" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT;
-                case "alt" -> modifiers |= org.lwjgl.glfw.GLFW.GLFW_MOD_ALT;
-                default -> { return failure("Unknown modifier " + mod + "; use shortcut, ctrl, super, shift or alt."); }
-            }
-        }
-        int held = modifiers;
-        return onClient(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // Through the keyboard handler, like a real key press: mods that hook screen keys, such as EMI and JEI, see
-            // it, and Escape opens the pause menu.
-            long window = minecraft.getWindow().getWindow();
-            minecraft.keyboardHandler.keyPress(window, key.getValue(), 0, org.lwjgl.glfw.GLFW.GLFW_PRESS, held);
-            minecraft.keyboardHandler.keyPress(window, key.getValue(), 0, org.lwjgl.glfw.GLFW.GLFW_RELEASE, held);
-            return ok();
-        });
-    }
-
-    static JsonObject type(String text) throws Exception {
-        return onClient(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            if(minecraft.screen == null) return failure("No screen is open to type into.");
-            text.codePoints().forEach(c -> { for(char ch : Character.toChars(c)) minecraft.screen.charTyped(ch, 0); });
-            return ok();
-        });
-    }
-
-    /** Moves the cursor to screenshot pixel coordinates in the open screen, then clicks there unless {@code button} is null. */
-    static JsonObject click(double x, double y, Integer button) throws Exception {
-        return onClient(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            if(minecraft.screen == null) return failure("No screen is open to " + (button == null ? "move the mouse in." : "click."));
-            Window window = minecraft.getWindow();
-            double guiX = x * window.getGuiScaledWidth() / window.getWidth(), guiY = y * window.getGuiScaledHeight() / window.getHeight();
-            // A hidden window gets no cursor events, so screens would keep hovering wherever the cursor was left. The
-            // cursor is in window coordinates, which differ from screenshot pixels on high-DPI displays.
-            MouseHandlerAccessor mouse = (MouseHandlerAccessor)minecraft.mouseHandler;
-            mouse.createDisplayWorksDev$setXpos(x * window.getScreenWidth() / window.getWidth());
-            mouse.createDisplayWorksDev$setYpos(y * window.getScreenHeight() / window.getHeight());
-            minecraft.screen.mouseMoved(guiX, guiY);
-            if(button != null) {
-                minecraft.screen.mouseClicked(guiX, guiY, button);
-                if(minecraft.screen != null) minecraft.screen.mouseReleased(guiX, guiY, button);
-            }
-            return ok();
-        });
+        }));
     }
 
     // ---- Helpers ----
@@ -577,7 +666,7 @@ public final class DevTools {
         PendingScreenshot(List<Path> files, long intervalNanos) { this.files = files; this.intervalNanos = intervalNanos; }
     }
 
-    private static JsonObject describe(HitResult target) {
+    static JsonObject describe(HitResult target) {
         JsonObject json = new JsonObject();
         if(target instanceof BlockHitResult block && target.getType() == HitResult.Type.BLOCK) {
             json.addProperty("type", "block");
@@ -594,7 +683,7 @@ public final class DevTools {
         return json;
     }
 
-    private static <T> T onClient(Supplier<T> action) throws Exception {
+    static <T> T onClient(Supplier<T> action) throws Exception {
         return Minecraft.getInstance().submit(action).get(1, TimeUnit.MINUTES);
     }
 
