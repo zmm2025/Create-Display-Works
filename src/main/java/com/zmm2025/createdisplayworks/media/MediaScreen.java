@@ -171,6 +171,9 @@ public final class MediaScreen extends AbstractSimiScreen {
                 byte[] pixels=clip.editable()==null?null:clip.editable().pixels();
                 minecraft.execute(()->{if(minecraft.screen!=this)return;preview=clip;original=clip.editable();originalPixels=pixels;fresh=true;dirty=false;busy=false;playing=true;previewTicks=0;status=text("status.ready");init();setFocused(null);syncControls();});
             }catch(Exception exception){minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(exception);syncControls();});}
+            // Errors such as a missing library would otherwise leave the screen loading forever.
+            catch(Throwable failure){com.mojang.logging.LogUtils.getLogger().error("Media import failed",failure);
+                minecraft.execute(()->{if(minecraft.screen!=this)return;busy=false;showError(new java.io.IOException(failure));syncControls();});}
         });
     }
     private void showError(Exception error){
