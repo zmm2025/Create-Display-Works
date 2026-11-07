@@ -22,41 +22,19 @@ public final class BoardCells {
     public static boolean valid(int cell) {
         return cell != NONE && Math.abs(column(cell)) < FlipDotAssembly.MAX_SPAN && Math.abs(row(cell)) < FlipDotAssembly.MAX_SPAN;
     }
-    /** Whether the tiles of one earlier board were given a quarter turn, so tiles that shared a row or column no longer do. */
-    public static boolean quarterTurned(int[] previous, int[] current, int[] previousShape) {
+    /**
+     * Whether the tiles of one earlier board now sit in different cells, because the whole board was turned or flipped.
+     * {@code previous} holds each tile's cell before and {@code current} its cell now, in the same order.
+     * {@code previousShape} is the old controller's list of its board's cells. Tiles that were added, removed or came
+     * from two boards don't count.
+     */
+    public static boolean turned(int[] previous, int[] current, int[] previousShape) {
         if (previous.length != current.length || previous.length != previousShape.length) return false;
         if (Arrays.equals(previous, current)) return false;
         int[] before = previous.clone(), shape = previousShape.clone();
         Arrays.sort(before); Arrays.sort(shape);
         if (!Arrays.equals(before, shape)) return false;
-        for (int i = 0; i < previous.length; i++) for (int j = i + 1; j < previous.length; j++) {
-            if (row(previous[i]) == row(previous[j]) && row(current[i]) != row(current[j])) return true;
-            if (column(previous[i]) == column(previous[j]) && column(current[i]) != column(current[j])) return true;
-        }
-        return false;
-    }
-    /**
-     * Finds how a board's tiles were rearranged when the whole board was turned, flipped or mirrored. {@code previous}
-     * holds each tile's cell before and {@code current} its cell now, in the same order. {@code previousShape} is the
-     * old controller's list of its board's cells.
-     * <p>
-     * Returns, for each tile, the index of the tile that used to sit in its cell, so content can follow the cells.
-     * Returns null when nothing moved, or when the tiles aren't exactly one earlier board, for example because tiles
-     * were added, removed or came from two boards.
-     */
-    public static int[] rearrangement(int[] previous, int[] current, int[] previousShape) {
-        if (previous.length != current.length || previous.length != previousShape.length) return null;
-        if (Arrays.equals(previous, current)) return null;
-        int[] before = previous.clone(), after = current.clone(), shape = previousShape.clone();
-        Arrays.sort(before); Arrays.sort(after); Arrays.sort(shape);
-        if (!Arrays.equals(before, after) || !Arrays.equals(before, shape)) return null;
-        for (int i = 1; i < before.length; i++) if (before[i] == before[i - 1]) return null;
-        int[] source = new int[current.length];
-        for (int i = 0; i < current.length; i++) {
-            int index = -1;
-            for (int j = 0; j < previous.length && index < 0; j++) if (previous[j] == current[i]) index = j;
-            source[i] = index;
-        }
-        return source;
+        for (int i = 1; i < before.length; i++) if (before[i] == before[i - 1]) return false;
+        return true;
     }
 }

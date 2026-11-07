@@ -94,7 +94,7 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         }
         var controller = found.controller();
         int[] cells=found.tiles().stream().mapToInt(t->found.cell(t.worldPosition)).toArray();
-        rearrange(found,cells);
+        clearIfTurned(found.tiles(),cells);
         for (FlipDotBlockEntity tile : found.tiles()) if (tile != controller && tile.media != null) tile.clearMedia();
         int[] members=cells.clone();Arrays.sort(members);
         if(controller.memberCells.length>0 && !Arrays.equals(controller.memberCells,members))controller.clearMedia();
@@ -106,39 +106,15 @@ public class FlipDotBlockEntity extends KineticBlockEntity {
         found.controller().rasterize(found);
     }
     /**
-     * When a whole board was turned upside down or mirrored, for example by a bearing or a pasted copy, its tiles swap
-     * places. Moves each cell's text, frame and media to the tile now in that cell, so the board keeps showing the same
-     * picture the right way up.
+     * A board that was turned or flipped, for example by a bearing or a mirrored paste, clears, like Create's display
+     * boards. Turning about the vertical axis keeps every tile's cell, so that doesn't count.
      */
-    private static void rearrange(FlipDotAssembly found,int[] cells) {
-        var tiles=found.tiles();
+    private static void clearIfTurned(List<FlipDotBlockEntity> tiles,int[] cells) {
         int[] previous=tiles.stream().mapToInt(t->t.boardCell).toArray();
-        FlipDotBlockEntity oldController=null;
-        for(int i=0;i<previous.length;i++)if(previous[i]==BoardCells.ORIGIN)oldController=tiles.get(i);
-        if(oldController==null)return;
-        if(BoardCells.quarterTurned(previous,cells,oldController.memberCells)){clearBoard(tiles);return;}
-        int[] source=BoardCells.rearrangement(previous,cells,oldController.memberCells);
-        if(source==null)return;
-        record Content(long pending,String rowText,boolean hasText,boolean bitmapMode){}
-        var content=tiles.stream().map(t->new Content(t.pending,t.rowText,t.hasText,t.bitmapMode)).toList();
-        for(int i=0;i<tiles.size();i++) {
-            var tile=tiles.get(i);var moved=content.get(source[i]);
-            tile.pending=moved.pending;tile.rowText=moved.rowText;tile.hasText=moved.hasText;tile.bitmapMode=moved.bitmapMode;tile.setChanged();
+        for(int i=0;i<previous.length;i++)if(previous[i]==BoardCells.ORIGIN&&BoardCells.turned(previous,cells,tiles.get(i).memberCells)) {
+            for(var tile:tiles){tile.clearMedia();tile.hasText=false;tile.rowText="";tile.bitmapMode=false;tile.setChanged();}
+            return;
         }
-        var controller=found.controller();
-        if(oldController!=controller){controller.memberCells=oldController.memberCells.clone();oldController.moveMediaTo(controller);}
-    }
-    /** A quarter turn clears a board, like Create's display boards. */
-    private static void clearBoard(List<FlipDotBlockEntity> tiles) {
-        for(var tile:tiles){tile.clearMedia();tile.hasText=false;tile.rowText="";tile.bitmapMode=false;tile.setChanged();}
-    }
-    private void moveMediaTo(FlipDotBlockEntity target) {
-        if(media==null)return;
-        target.clearMedia();
-        target.media=media;target.mediaId=mediaId;target.mediaArchive=mediaArchive;target.mediaFrame=mediaFrame;
-        target.mediaPlaying=mediaPlaying;target.mediaLoop=mediaLoop;target.playbackDelay=playbackDelay;
-        target.claimMedia();target.setChanged();
-        clearMedia();
     }
     private void rasterize(FlipDotAssembly group) {
         String[] lines = new String[group.height()];
