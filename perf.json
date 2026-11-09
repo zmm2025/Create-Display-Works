@@ -1,0 +1,6 @@
+{
+  "setup": "Four 16x16-block RGB matrix boards (1,024 tiles, 262,144 pixels), every board playing a generated 60-frame color video; hidden dev client, frame cap lifted, 8-second /perf measurement",
+  "fps": 383.1,
+  "frameMs": {"avg": 2.61, "p50": 2.24, "p95": 4.88, "p99": 7.62},
+  "rgbMatrixRendererMsPerFrame": {"avg": 0.41, "p50": 0.32, "p95": 1.35, "p99": 1.79, "rendersPerFrame": 1024}
+}
