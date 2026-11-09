@@ -2,7 +2,8 @@
 //
 // The evidence is a commit at refs/pr-evidence/branches/<branch> in the repo the PR comes from, holding PREVIEW.md and
 // the files it embeds. This pins that commit in this repo as refs/pr-evidence/pulls/<number>, so the files outlive the
-// branch and any fork, then puts PREVIEW.md in the PR body with its links pointing at the pinned files.
+// branch and any fork, then puts PREVIEW.md in the PR body with its links pointing at the pinned files. Once the PR
+// merges, the branch's evidence ref is deleted, so it doesn't outlive the branch GitHub deleted.
 //
 // Runs in .github/workflows/pr-evidence.yml. It never runs the PR's code. To run it by hand:
 //   GITHUB_TOKEN=$(gh auth token) GITHUB_REPOSITORY=owner/repo PR_NUMBER=12 node .github/scripts/pr-evidence.mjs
@@ -53,101 +54,122 @@ if (!head) {
   process.exit(0);
 }
 const branchRef = `pr-evidence/branches/${pr.head.ref}`;
-const found = await api("GET", `/repos/${head}/git/ref/${encodePath(branchRef)}`);
-if (!found) {
-  console.log(`${head} has no refs/${branchRef}, so there's nothing to add.`);
-  process.exit(0);
-}
-const sha = found.object.sha;
-const body = (pr.body ?? "").replace(/\r\n/g, "\n");
-if (body.match(START)?.[1] === sha) {
-  console.log(`The Preview already shows ${sha.slice(0, 10)}.`);
-  process.exit(0);
-}
-
-// Pin the evidence here. A fork's commit has to be fetched and pushed, since this repo can't point a ref at it yet.
 const pinRef = `pr-evidence/pulls/${number}`;
-if (head.toLowerCase() === base.toLowerCase()) {
+const sameRepo = head.toLowerCase() === base.toLowerCase();
+
+await fillPreview();
+if (pr.merged_at) await retireBranchEvidence();
+
+// The PR keeps its pinned copy, so a merged branch's evidence ref is only clutter. A fork's ref isn't ours to delete,
+// and evidence that never got pinned, or that another open PR from the same branch still uses, stays.
+async function retireBranchEvidence() {
+  if (!sameRepo) return;
+  const branch = await api("GET", `/repos/${base}/git/ref/${encodePath(branchRef)}`);
   const pinned = await api("GET", `/repos/${base}/git/ref/${pinRef}`);
-  if (!pinned) await api("POST", `/repos/${base}/git/refs`, { ref: `refs/${pinRef}`, sha });
-  else if (pinned.object.sha !== sha) await api("PATCH", `/repos/${base}/git/refs/${pinRef}`, { sha, force: true });
-} else {
-  const dir = mkdtempSync(join(tmpdir(), "pr-evidence-"));
-  const git = (...args) => execFileSync("git", args, { cwd: dir, stdio: ["ignore", "inherit", "inherit"] });
-  try {
-    git("init", "--quiet", "--bare");
-    git("fetch", "--quiet", "--no-tags", `https://github.com/${head}.git`, `refs/${branchRef}`);
-    git("push", "--quiet", "--force", `https://x-access-token:${token}@github.com/${base}.git`, `${sha}:refs/${pinRef}`);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  if (!branch || branch.object.sha !== pinned?.object.sha) return;
+  const owner = pr.head.repo.owner.login;
+  const open = await api("GET", `/repos/${base}/pulls?state=open&head=${encodeURIComponent(`${owner}:${pr.head.ref}`)}`);
+  if (open?.length) return;
+  await api("DELETE", `/repos/${base}/git/refs/${encodePath(branchRef)}`);
+  console.log(`Deleted refs/${branchRef}. PR #${number} keeps its copy at refs/${pinRef}.`);
+}
+
+async function fillPreview() {
+  const found = await api("GET", `/repos/${head}/git/ref/${encodePath(branchRef)}`);
+  if (!found) {
+    console.log(`${head} has no refs/${branchRef}, so there's nothing to add.`);
+    return;
   }
+  const sha = found.object.sha;
+  const body = (pr.body ?? "").replace(/\r\n/g, "\n");
+  if (body.match(START)?.[1] === sha) {
+    console.log(`The Preview already shows ${sha.slice(0, 10)}.`);
+    return;
+  }
+
+  // Pin the evidence here. A fork's commit has to be fetched and pushed, since this repo can't point a ref at it yet.
+  if (sameRepo) {
+    const pinned = await api("GET", `/repos/${base}/git/ref/${pinRef}`);
+    if (!pinned) await api("POST", `/repos/${base}/git/refs`, { ref: `refs/${pinRef}`, sha });
+    else if (pinned.object.sha !== sha) await api("PATCH", `/repos/${base}/git/refs/${pinRef}`, { sha, force: true });
+  } else {
+    const dir = mkdtempSync(join(tmpdir(), "pr-evidence-"));
+    const git = (...args) => execFileSync("git", args, { cwd: dir, stdio: ["ignore", "inherit", "inherit"] });
+    try {
+      git("init", "--quiet", "--bare");
+      git("fetch", "--quiet", "--no-tags", `https://github.com/${head}.git`, `refs/${branchRef}`);
+      git("push", "--quiet", "--force", `https://x-access-token:${token}@github.com/${base}.git`, `${sha}:refs/${pinRef}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const tree = await api("GET", `/repos/${base}/git/trees/${sha}?recursive=1`);
+  const files = new Map(tree.tree.filter((entry) => entry.type === "blob").map((entry) => [entry.path, entry.sha]));
+  if (!files.has(PREVIEW)) {
+    console.log(`The evidence at ${sha.slice(0, 10)} has no ${PREVIEW}, so there's nothing to add.`);
+    return;
+  }
+  const previewBlob = await api("GET", `/repos/${base}/git/blobs/${files.get(PREVIEW)}`);
+  const preview = Buffer.from(previewBlob.content, "base64").toString("utf8").replace(/\r\n/g, "\n").trim();
+
+  const rawUrl = (path) => `https://raw.githubusercontent.com/${base}/${sha}/${encodePath(path)}`;
+  const evidencePath = (target) => {
+    let path = target.replace(/^<|>$/g, "").replace(/^\.\//, "");
+    try {
+      path = decodeURIComponent(path);
+    } catch {}
+    return files.has(path) && path !== PREVIEW ? path : null;
+  };
+
+  // Uploads the author already dragged into a drop block stay, unless the file they replace has changed since.
+  const kept = new Map();
+  for (const [, name, blob, content] of body.match(BLOCK)?.[0].matchAll(DROP_BLOCK) ?? []) {
+    if (!content.includes(DROP_PROMPT)) kept.set(`${decodeURIComponent(name)} ${blob}`, content);
+  }
+
+  const rendered = preview
+    .replace(DROP_MARKER, (marker, target) => {
+      const path = evidencePath(target);
+      if (!path) return marker;
+      const blob = files.get(path);
+      const name = path.split("/").pop();
+      const content =
+        kept.get(`${path} ${blob}`) ??
+        `▶️ **${DROP_PROMPT} \`${name}\`** by dragging the file into the editor, so it plays here. [Download it](${rawUrl(path)})`;
+      return `<!-- drop ${encodeURIComponent(path)} blob=${blob} -->\n${content}\n<!-- /drop -->`;
+    })
+    .replace(/(\]\(\s*)(<[^>]+>|[^)\s<]+)/g, (link, open, target) => {
+      const path = evidencePath(target);
+      return path ? `${open}${rawUrl(path)}` : link;
+    })
+    .replace(/\b(src|href)(\s*=\s*)(["'])([^"']+)\3/g, (attribute, name, equals, quote, target) => {
+      const path = evidencePath(target);
+      return path ? `${name}${equals}${quote}${rawUrl(path)}${quote}` : attribute;
+    });
+
+  const block = [
+    `<!-- pr-evidence:start sha=${sha} -->`,
+    rendered,
+    "",
+    `<sub>[All evidence files](https://github.com/${base}/tree/${sha}) · uploaded with \`./gradlew prEvidence\`</sub>`,
+    END,
+  ].join("\n");
+
+  let updated;
+  if (BLOCK.test(body)) {
+    updated = body.replace(BLOCK, () => block);
+  } else if (/^## Preview[ \t]*$/m.test(body)) {
+    // Replace whatever the PR's author or generator wrote under the heading, up to the next heading of the same level.
+    updated = body.replace(/^(## Preview[ \t]*\n)[\s\S]*?(?=^## |(?![\s\S]))/m, (_, heading) => `${heading}\n${block}\n\n`);
+  } else if (/^## Testing[ \t]*$/m.test(body)) {
+    updated = body.replace(/^## Testing[ \t]*$/m, (heading) => `## Preview\n\n${block}\n\n${heading}`);
+  } else {
+    updated = `${body.trimEnd()}\n\n## Preview\n\n${block}\n`;
+  }
+  if (updated.length > MAX_BODY) {
+    throw new Error(`The PR body would be ${updated.length} characters, over GitHub's ${MAX_BODY}. Shorten ${PREVIEW}.`);
+  }
+  await api("PATCH", `/repos/${base}/pulls/${number}`, { body: updated });
+  console.log(`Filled PR #${number}'s Preview from ${head} ${sha.slice(0, 10)}.`);
 }
-
-const tree = await api("GET", `/repos/${base}/git/trees/${sha}?recursive=1`);
-const files = new Map(tree.tree.filter((entry) => entry.type === "blob").map((entry) => [entry.path, entry.sha]));
-if (!files.has(PREVIEW)) {
-  console.log(`The evidence at ${sha.slice(0, 10)} has no ${PREVIEW}, so there's nothing to add.`);
-  process.exit(0);
-}
-const previewBlob = await api("GET", `/repos/${base}/git/blobs/${files.get(PREVIEW)}`);
-const preview = Buffer.from(previewBlob.content, "base64").toString("utf8").replace(/\r\n/g, "\n").trim();
-
-const rawUrl = (path) => `https://raw.githubusercontent.com/${base}/${sha}/${encodePath(path)}`;
-const evidencePath = (target) => {
-  let path = target.replace(/^<|>$/g, "").replace(/^\.\//, "");
-  try {
-    path = decodeURIComponent(path);
-  } catch {}
-  return files.has(path) && path !== PREVIEW ? path : null;
-};
-
-// Uploads the author already dragged into a drop block stay, unless the file they replace has changed since.
-const kept = new Map();
-for (const [, name, blob, content] of body.match(BLOCK)?.[0].matchAll(DROP_BLOCK) ?? []) {
-  if (!content.includes(DROP_PROMPT)) kept.set(`${decodeURIComponent(name)} ${blob}`, content);
-}
-
-const rendered = preview
-  .replace(DROP_MARKER, (marker, target) => {
-    const path = evidencePath(target);
-    if (!path) return marker;
-    const blob = files.get(path);
-    const name = path.split("/").pop();
-    const content =
-      kept.get(`${path} ${blob}`) ??
-      `▶️ **${DROP_PROMPT} \`${name}\`** by dragging the file into the editor, so it plays here. [Download it](${rawUrl(path)})`;
-    return `<!-- drop ${encodeURIComponent(path)} blob=${blob} -->\n${content}\n<!-- /drop -->`;
-  })
-  .replace(/(\]\(\s*)(<[^>]+>|[^)\s<]+)/g, (link, open, target) => {
-    const path = evidencePath(target);
-    return path ? `${open}${rawUrl(path)}` : link;
-  })
-  .replace(/\b(src|href)(\s*=\s*)(["'])([^"']+)\3/g, (attribute, name, equals, quote, target) => {
-    const path = evidencePath(target);
-    return path ? `${name}${equals}${quote}${rawUrl(path)}${quote}` : attribute;
-  });
-
-const block = [
-  `<!-- pr-evidence:start sha=${sha} -->`,
-  rendered,
-  "",
-  `<sub>[All evidence files](https://github.com/${base}/tree/${sha}) · uploaded with \`./gradlew prEvidence\`</sub>`,
-  END,
-].join("\n");
-
-let updated;
-if (BLOCK.test(body)) {
-  updated = body.replace(BLOCK, () => block);
-} else if (/^## Preview[ \t]*$/m.test(body)) {
-  // Replace whatever the PR's author or generator wrote under the heading, up to the next heading of the same level.
-  updated = body.replace(/^(## Preview[ \t]*\n)[\s\S]*?(?=^## |(?![\s\S]))/m, (_, heading) => `${heading}\n${block}\n\n`);
-} else if (/^## Testing[ \t]*$/m.test(body)) {
-  updated = body.replace(/^## Testing[ \t]*$/m, (heading) => `## Preview\n\n${block}\n\n${heading}`);
-} else {
-  updated = `${body.trimEnd()}\n\n## Preview\n\n${block}\n`;
-}
-if (updated.length > MAX_BODY) {
-  throw new Error(`The PR body would be ${updated.length} characters, over GitHub's ${MAX_BODY}. Shorten ${PREVIEW}.`);
-}
-await api("PATCH", `/repos/${base}/pulls/${number}`, { body: updated });
-console.log(`Filled PR #${number}'s Preview from ${head} ${sha.slice(0, 10)}.`);

@@ -150,13 +150,19 @@ asked. Do this for each change, not one summary image. A text description doesn'
   a lang key, not an English sentence, so each player sees their own language. Proper names, file format names and
   player-entered text can stay literal. Log, exception and dev-tool text that players never see can stay in code.
 
-## Branch names
+## Branches
 
-T3 Code names each thread's branch from the user's first message, before any code exists, so the name can stop
-matching the work as the scope grows. Before a branch's first push, or before opening a PR, compare the branch name
-with the full diff against `main`. If the name no longer describes the change, rename the branch locally with
-`git branch -m <type>/<short-description>` before pushing. Use the `feat/`, `fix/`, `docs/` or `chore/` prefix that
-fits the change. If the branch is already on GitHub, ask before renaming it there.
+T3 Code names each thread's branch and tracks the thread by that name. It removes a settled thread's worktree only
+while the worktree is still on that branch, and git can't tell it about a rename. So keep the branch T3 Code gave
+you:
+
+- Never rename the branch (`git branch -m`), switch the worktree to another branch, or create extra local branches.
+  A renamed or switched worktree is never cleaned up. If the name no longer fits the change, the PR title and
+  description carry the meaning instead.
+- In the main checkout, stay on `main`. If the work needs a branch of its own, call `t3_worktree_handoff` before you
+  edit anything, so it moves to a worktree T3 Code tracks and cleans up.
+- Don't delete merged branches by hand. `pruneBranches` does that when a thread settles (see
+  [DEVELOPMENT.md](DEVELOPMENT.md#merged-branches)).
 
 ## PR evidence
 
@@ -180,5 +186,3 @@ workflow then puts it in the PR's Preview section.
   work changes what the evidence shows, and remove files that no longer apply.
 - If the evidence has drop files, add a short note before your closing line that lists them, linked to their files in
   `build/pr-evidence/`, so the user can drag them into the PR once it's open.
-- Settle the branch name (see [Branch names](#branch-names)) before the first upload. After renaming the branch, run
-  `prEvidence` again.

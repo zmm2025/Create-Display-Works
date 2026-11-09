@@ -1,0 +1,137 @@
+// Deletes local branches whose work is already in the default branch, so merged branches don't pile up. T3 Code
+// removes a settled thread's worktree but leaves its branch, and GitHub deletes the remote branch on merge, so
+// without this every thread leaves a local branch behind. See DEVELOPMENT.md.
+//
+//   ./gradlew pruneBranches          deletes merged branches and lists the ones it keeps
+//   ./gradlew pruneBranches -PdryRun lists what it would delete, without deleting anything
+//
+// A branch is deleted only when nothing on it can be lost: it isn't checked out in any worktree, and its last commit
+// is either in the default branch already or is (or is behind) the head of a merged GitHub PR. Squash merges leave
+// the branch's own commits outside main, so the PR check needs the gh CLI. Without gh, only branches with no commits
+// beyond main are deleted.
+
+import groovy.json.JsonSlurper
+
+import java.util.concurrent.CompletableFuture
+
+abstract class PruneBranchesTask extends DefaultTask {
+    // A branch younger than this may belong to a worktree T3 Code is still creating.
+    static final long MIN_AGE_SECONDS = 10 * 60
+
+    @Input abstract Property<String> getCheckout()
+    @Input abstract Property<Boolean> getDryRun()
+
+    @TaskAction
+    void run() {
+        String remote = 'origin'
+        Map fetch = exec(['git', 'fetch', '--prune', '--quiet', remote])
+        if (fetch.exit != 0) {
+            logger.lifecycle("PRUNE BRANCHES: SKIPPED - couldn't fetch ${remote}: ${fetch.errors.trim()}")
+            return
+        }
+        git(['worktree', 'prune'])
+        String defaultBranch = (tryGit(['symbolic-ref', '--quiet', '--short', "refs/remotes/${remote}/HEAD"]) ?: "${remote}/main")
+                .trim().substring(remote.length() + 1)
+        String base = "refs/remotes/${remote}/${defaultBranch}"
+
+        Map<String, String> checkedOut = [:]
+        String worktree = null, mainCheckout = null
+        git(['worktree', 'list', '--porcelain']).readLines().each { String line ->
+            if (line.startsWith('worktree ')) worktree = line.substring(9)
+            if (mainCheckout == null) mainCheckout = worktree
+            if (line.startsWith('branch refs/heads/')) checkedOut[line.substring(18)] = worktree
+        }
+
+        List<Map> mergedPrs = mergedPullRequests()
+        Set<String> mergedHeads = mergedPrs*.headRefOid as Set
+        long now = System.currentTimeMillis().intdiv(1000)
+
+        List<String> deleted = [], kept = []
+        git(['for-each-ref', '--format=%(refname:short)%09%(objectname)', 'refs/heads']).readLines().findAll().each { String line ->
+            def (String branch, String tip) = line.split('\t')
+            if (branch == defaultBranch) return
+            boolean viaPr = tip in mergedHeads || mergedPrs.any { it.headRefName == branch && isAncestor(tip, it.headRefOid as String) }
+            if (!viaPr && !isAncestor(tip, base)) {
+                kept << "${branch} has commits that are in neither ${defaultBranch} nor a merged PR."
+                return
+            }
+            String where = checkedOut[branch]
+            if (where != null) {
+                // A branch with nothing new is usually a thread that hasn't committed yet, so only merged PRs are worth a note.
+                if (where == mainCheckout && viaPr) {
+                    kept << "${branch} is merged, but the main checkout is still on it. Run `git switch ${defaultBranch}` there to free it."
+                } else if (viaPr) {
+                    kept << "${branch} is merged, but still checked out in ${where}. T3 Code removes a settled thread's worktree " +
+                            "unless it has uncommitted changes or its branch was renamed."
+                }
+                return
+            }
+            String touched = tryGit(['log', '-g', '-1', '--format=%ct', "refs/heads/${branch}"])?.trim()
+            if (touched?.isLong() && now - (touched as long) < MIN_AGE_SECONDS) {
+                kept << "${branch} was created or moved in the last 10 minutes."
+                return
+            }
+            if (!dryRun.get()) git(['branch', '-D', branch])
+            deleted << branch
+        }
+
+        // Keep the local default branch current when no checkout has it open, so new branches don't start from an old one.
+        String localDefault = tryGit(['rev-parse', '--verify', '--quiet', "refs/heads/${defaultBranch}"])?.trim()
+        String remoteDefault = git(['rev-parse', base]).trim()
+        boolean fastForward = localDefault && localDefault != remoteDefault && !checkedOut.containsKey(defaultBranch) &&
+                isAncestor(localDefault, remoteDefault)
+        if (fastForward && !dryRun.get()) git(['update-ref', "refs/heads/${defaultBranch}", remoteDefault, localDefault])
+
+        String prefix = dryRun.get() ? 'PRUNE BRANCHES: DRY RUN - would delete' : 'PRUNE BRANCHES: DELETED'
+        logger.lifecycle(deleted ? "${prefix} ${deleted.size()} merged branches: ${deleted.join(', ')}"
+                : 'PRUNE BRANCHES: NO CHANGES - no merged branches to delete.')
+        if (fastForward) {
+            logger.lifecycle("${dryRun.get() ? 'Would fast-forward' : 'Fast-forwarded'} ${defaultBranch} to ${remote}/${defaultBranch} (${remoteDefault.take(7)}).")
+        }
+        if (kept) logger.lifecycle("Kept:\n${kept.collect { "  ${it}" }.join('\n')}")
+        if (mergedPrs.isEmpty()) logger.lifecycle("Couldn't list merged PRs with gh, so squash-merged branches were kept.")
+    }
+
+    /** Merged PRs as [headRefName, headRefOid] maps, or an empty list if gh isn't installed or signed in. */
+    protected List<Map> mergedPullRequests() {
+        Map result
+        try {
+            result = exec(['gh', 'pr', 'list', '--state', 'merged', '--limit', '1000', '--json', 'headRefName,headRefOid'])
+        } catch (IOException ignored) {
+            return []
+        }
+        if (result.exit != 0) return []
+        return new JsonSlurper().parseText(new String(result.output as byte[], 'UTF-8')) as List<Map>
+    }
+
+    protected boolean isAncestor(String commit, String of) {
+        return exec(['git', 'merge-base', '--is-ancestor', commit, of]).exit == 0
+    }
+
+    protected String git(List args) {
+        Map result = exec(['git'] + args)
+        if (result.exit != 0) throw new GradleException("PRUNE BRANCHES: ERROR - git ${args[0]} failed: ${result.errors.trim()}")
+        return new String(result.output as byte[], 'UTF-8')
+    }
+
+    protected String tryGit(List args) {
+        Map result = exec(['git'] + args)
+        return result.exit == 0 ? new String(result.output as byte[], 'UTF-8') : null
+    }
+
+    protected Map exec(List command) {
+        Process process = new ProcessBuilder(command.collect { it.toString() }).directory(new File(checkout.get())).start()
+        process.outputStream.close()
+        CompletableFuture<String> errors = CompletableFuture.supplyAsync { process.errorStream.getText('UTF-8') }
+        CompletableFuture<byte[]> output = CompletableFuture.supplyAsync { process.inputStream.bytes }
+        int exit = process.waitFor()
+        return [exit: exit, output: output.get(), errors: errors.get()]
+    }
+}
+
+tasks.register('pruneBranches', PruneBranchesTask) {
+    group = 'git'
+    description = 'Deletes local branches already merged into main (see DEVELOPMENT.md). T3 Code runs it when a thread settles. -PdryRun only lists them.'
+    checkout = projectDir.absolutePath
+    dryRun = providers.gradleProperty('dryRun').present
+}

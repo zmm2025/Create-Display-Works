@@ -27,7 +27,7 @@ themselves only call the Gradle tasks above, so their behavior lives in the repo
 | --- | --- | --- | --- |
 | Launch Minecraft | `./gradlew runDevClient; if ($LASTEXITCODE -eq 0) { exit }` | play | |
 | Reload Minecraft | `./gradlew devReload` | build | |
-| Stop Minecraft | `./gradlew devStop` | debug | **Run in the thread's worktree when the thread settles** |
+| Stop Minecraft | `./gradlew devStop pruneBranches --continue` | debug | **Run in the thread's worktree when the thread settles** |
 
 T3 Code's terminals run PowerShell on Windows. On macOS and Linux, use `./gradlew runDevClient && exit` for
 **Launch Minecraft**.
@@ -45,9 +45,26 @@ you can read the error.
 
 When a thread in its own worktree settles, manually or automatically, T3 Code runs **Stop Minecraft** there. That
 closes the worktree's game, whether an agent started it or you launched it, and with it the game's terminal. T3 Code
-skips settle scripts for threads on the main checkout, so this never closes your main world's game.
+skips settle scripts for threads on the main checkout, so this never closes your main world's game. T3 Code runs only
+the first script marked to run on settle, so **Stop Minecraft** also runs `pruneBranches` (see
+[Merged branches](#merged-branches)).
 
 The client runs inside a Gradle daemon, so `./gradlew --stop` closes every running dev client without saving.
+
+### Merged branches
+
+GitHub deletes a PR's branch when it merges, and T3 Code removes a settled thread's worktree, but nothing deletes the
+local branch. `./gradlew pruneBranches` does, and **Stop Minecraft** runs it whenever a thread settles. A thread's own
+branch is still checked out at that moment, so it goes at the next settle.
+
+It deletes a branch only when nothing on it can be lost: no worktree has it checked out, and its last commit is
+already in `main` or is the head of a merged PR (found with the `gh` CLI, since squash merges leave the branch's
+commits outside `main`). It also fast-forwards the local `main` when no checkout has it open. Everything else stays,
+and the task lists merged branches that are still checked out. `-PdryRun` lists what it would delete without
+deleting anything.
+
+T3 Code only removes a worktree that's still on the branch it created, so agents never rename or switch branches (see
+[AGENTS.md](AGENTS.md#branches)). A worktree with uncommitted changes or an open terminal stays too.
 
 ### The main world and worktree copies
 
