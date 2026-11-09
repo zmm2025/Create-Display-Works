@@ -13,8 +13,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(Window.class)
 abstract class WindowMixin {
-    @Inject(method="<init>", at=@At(value="INVOKE", target="Lorg/lwjgl/glfw/GLFW;glfwDefaultWindowHints()V", shift=At.Shift.AFTER))
+    @Inject(
+            method = "<init>",
+            at =
+                    @At(
+                            value = "INVOKE",
+                            target = "Lorg/lwjgl/glfw/GLFW;glfwDefaultWindowHints()V",
+                            shift = At.Shift.AFTER))
     private void createDisplayWorksDev$startHidden(CallbackInfo info) {
-        if(Boolean.getBoolean("createdisplayworks.dev.hidden")) GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
+        if (Boolean.getBoolean("createdisplayworks.dev.hidden"))
+            GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
     }
 }

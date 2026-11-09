@@ -8,6 +8,25 @@ import com.google.gson.JsonPrimitive;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.platform.Window;
 import com.zmm2025.createdisplayworks.CreateDisplayWorks;
+import java.io.File;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.lang.instrument.Instrumentation;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import net.minecraft.ChatFormatting;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.GuiMessage;
@@ -41,45 +60,29 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.lang.instrument.Instrumentation;
-import java.nio.channels.FileChannel;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
-
 /**
  * Development-only tooling for the {@code runDevClient} run: auto-joins the shared test world, hot-reloads code,
  * assets and data, and lets agents drive the dev player over a localhost-only HTTP API (see DEVELOPMENT.md).
  * Inert unless the run sets {@code createdisplayworks.dev.tools}.
  */
-@EventBusSubscriber(modid=CreateDisplayWorks.MOD_ID, value=Dist.CLIENT)
+@EventBusSubscriber(modid = CreateDisplayWorks.MOD_ID, value = Dist.CLIENT)
 public final class DevTools {
     static final boolean ENABLED = Boolean.getBoolean("createdisplayworks.dev.tools");
     private static final Logger LOGGER = LoggerFactory.getLogger("Display Works Dev Tools");
     private static final String WORKTREE = System.getProperty("createdisplayworks.dev.worktree", "");
     /** Created as soon as the mod's event subscribers load, so the baseline matches the classes the game loaded. */
-    private static final HotReloader RELOADER = ENABLED ? new HotReloader(paths("createdisplayworks.dev.classRoots"), paths("createdisplayworks.dev.resourceRoots")) : null;
-    private static final String RELOADED = "Reloaded the changes.";
+    private static final HotReloader RELOADER = ENABLED
+            ? new HotReloader(paths("createdisplayworks.dev.classRoots"), paths("createdisplayworks.dev.resourceRoots"))
+            : null;
+
     private static volatile PendingScreenshot screenshot;
     /** Encodes and saves screenshot frames off the render thread, so a sequence doesn't stall the frames it captures. */
-    private static final ExecutorService SCREENSHOT_WRITERS = Executors.newFixedThreadPool(Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 6), task -> {
-        Thread thread = new Thread(task, "Display Works Screenshot Writer");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ExecutorService SCREENSHOT_WRITERS =
+            Executors.newFixedThreadPool(Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 6), task -> {
+                Thread thread = new Thread(task, "Display Works Screenshot Writer");
+                thread.setDaemon(true);
+                return thread;
+            });
     /** Frames waiting to be saved before capture skips frames rather than buffer more full-size images. */
     private static final int MAX_UNSAVED_FRAMES = 32;
     /** Frames shown on a contact sheet; longer sequences show evenly spread frames. */
@@ -88,6 +91,13 @@ public final class DevTools {
     private static final int REMOTE_COMMAND_TICKS = 6;
     /** Which worktree and branch this client runs; shown in the window title. */
     private static final String LABEL = System.getProperty("createdisplayworks.dev.label", "dev client");
+    /**
+     * Where images shown in chat live; Gradle picks the folder. Chat embeds a file by its path and reads it from disk
+     * each time it's displayed, so a deleted file shows up broken. This folder is outside the worktree and its game
+     * folder, which both go away when the worktree is removed.
+     */
+    private static final Path EVIDENCE = Path.of(System.getProperty("createdisplayworks.dev.evidence", "evidence"));
+
     private static FileChannel clientLock;
     private static boolean titled;
     private static Object titledScreen, titledLevel;
@@ -99,79 +109,94 @@ public final class DevTools {
         JsonObject run() throws Exception;
     }
 
-    @SubscribeEvent public static void setup(FMLClientSetupEvent event) {
-        if(!ENABLED) return;
+    @SubscribeEvent
+    public static void setup(FMLClientSetupEvent event) {
+        if (!ENABLED) return;
         event.enqueueWork(() -> {
             // Keep the game running (and controllable) while its window is in the background.
             Minecraft minecraft = Minecraft.getInstance();
             minecraft.options.pauseOnLostFocus = false;
             minecraft.options.onboardAccessibility = false;
             minecraft.getTutorial().setStep(TutorialSteps.NONE);
-            Path gameDirectory = minecraft.gameDirectory.toPath().toAbsolutePath().normalize();
+            Path gameDirectory =
+                    minecraft.gameDirectory.toPath().toAbsolutePath().normalize();
             try {
                 // Held until the game exits; runDevClient checks it so only one dev client runs at a time.
-                clientLock = FileChannel.open(gameDirectory.resolve("dev-client.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-                if(clientLock.tryLock() == null) LOGGER.warn("Another dev client is already using {}", gameDirectory);
+                clientLock = FileChannel.open(
+                        gameDirectory.resolve("dev-client.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                if (clientLock.tryLock() == null) LOGGER.warn("Another dev client is already using {}", gameDirectory);
                 // Worktree games pass port 0 and get a free one; DevInstance records it for Gradle and agents.
                 int port = DevControlServer.start(Integer.getInteger("createdisplayworks.dev.controlPort", 25595));
                 DevInstance.started(port, WORKTREE);
                 DevSounds.track();
                 LOGGER.info("Dev control API listening on http://127.0.0.1:{} for {}", port, LABEL);
-            } catch(IOException e) {
+            } catch (IOException e) {
                 LOGGER.error("Dev control API could not start", e);
             }
         });
     }
 
     /** Vanilla rewrites the window title whenever the screen or level changes, so relabel it after each change. */
-    @SubscribeEvent public static void clientTick(ClientTickEvent.Post event) {
-        if(!ENABLED) return;
+    @SubscribeEvent
+    public static void clientTick(ClientTickEvent.Post event) {
+        if (!ENABLED) return;
         DevInstance.tick();
         DevInput.tick();
         Minecraft minecraft = Minecraft.getInstance();
-        if(titled && minecraft.screen == titledScreen && minecraft.level == titledLevel) return;
+        if (titled && minecraft.screen == titledScreen && minecraft.level == titledLevel) return;
         titled = true;
         titledScreen = minecraft.screen;
         titledLevel = minecraft.level;
-        minecraft.getWindow().setTitle(LABEL + " | Minecraft " + SharedConstants.getCurrentVersion().getName()
-            + (minecraft.getSingleplayerServer() != null ? " - Singleplayer" : ""));
+        minecraft
+                .getWindow()
+                .setTitle(LABEL + " | Minecraft "
+                        + SharedConstants.getCurrentVersion().getName()
+                        + (minecraft.getSingleplayerServer() != null ? " - Singleplayer" : ""));
     }
 
-    @SubscribeEvent public static void loggedIn(ClientPlayerNetworkEvent.LoggingIn event) {
-        if(!ENABLED) return;
-        Minecraft.getInstance().gui.getChat().addMessage(Component.literal("[Dev] ").withStyle(ChatFormatting.DARK_AQUA)
-            .append(Component.literal("Running " + LABEL).withStyle(ChatFormatting.GRAY)));
+    @SubscribeEvent
+    public static void loggedIn(ClientPlayerNetworkEvent.LoggingIn event) {
+        if (!ENABLED) return;
+        Minecraft.getInstance()
+                .gui
+                .getChat()
+                .addMessage(Component.literal("[Dev] ")
+                        .withStyle(ChatFormatting.DARK_AQUA)
+                        .append(Component.literal("Running " + LABEL).withStyle(ChatFormatting.GRAY)));
     }
 
     /** Held input would otherwise carry over into the next world. */
-    @SubscribeEvent public static void loggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
-        if(ENABLED) DevInput.releaseAll();
+    @SubscribeEvent
+    public static void loggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        if (ENABLED) DevInput.releaseAll();
     }
 
-    @SubscribeEvent public static void screenOpened(ScreenEvent.Opening event) {
-        if(ENABLED && event.getNewScreen() instanceof TitleScreen) DevWorld.titleScreenOpened();
+    @SubscribeEvent
+    public static void screenOpened(ScreenEvent.Opening event) {
+        if (ENABLED && event.getNewScreen() instanceof TitleScreen) DevWorld.titleScreenOpened();
     }
 
-    @SubscribeEvent public static void playerJoined(PlayerEvent.PlayerLoggedInEvent event) {
-        if(ENABLED && event.getEntity() instanceof ServerPlayer player) DevWorld.playerJoined(player);
+    @SubscribeEvent
+    public static void playerJoined(PlayerEvent.PlayerLoggedInEvent event) {
+        if (ENABLED && event.getEntity() instanceof ServerPlayer player) DevWorld.playerJoined(player);
     }
 
-    @SubscribeEvent public static void frameRendered(RenderFrameEvent.Post event) {
-        if(!ENABLED) return;
+    @SubscribeEvent
+    public static void frameRendered(RenderFrameEvent.Post event) {
+        if (!ENABLED) return;
         DevInspect.frameRendered();
         DevPerf.frameRendered();
-        DevRecorder.frameRendered();
         PendingScreenshot pending = screenshot;
-        if(pending == null || pending.framesToWait-- > 0) return;
+        if (pending == null || pending.framesToWait-- > 0) return;
         long now = System.nanoTime();
-        if(pending.times.isEmpty()) pending.start = now;
-        else if(now < pending.start + pending.times.size() * pending.intervalNanos) return;
-        if(pending.unsaved.get() >= MAX_UNSAVED_FRAMES) return;
+        if (pending.times.isEmpty()) pending.start = now;
+        else if (now < pending.start + pending.times.size() * pending.intervalNanos) return;
+        if (pending.unsaved.get() >= MAX_UNSAVED_FRAMES) return;
         Minecraft minecraft = Minecraft.getInstance();
         NativeImage image;
         try {
             image = Screenshot.takeScreenshot(minecraft.getMainRenderTarget());
-        } catch(Exception e) {
+        } catch (Exception e) {
             screenshot = null;
             minecraft.options.hideGui = pending.hideGuiBefore;
             pending.result.completeExceptionally(e);
@@ -179,23 +204,29 @@ public final class DevTools {
         }
         Path file = pending.files.get(pending.times.size());
         pending.times.add((now - pending.start) / 1_000_000.0);
-        pending.gameTimes.add(minecraft.level == null ? 0.0 : minecraft.level.getGameTime() + (double)minecraft.getTimer().getGameTimeDeltaPartialTick(false));
+        pending.gameTimes.add(
+                minecraft.level == null
+                        ? 0.0
+                        : minecraft.level.getGameTime()
+                                + (double) minecraft.getTimer().getGameTimeDeltaPartialTick(false));
         pending.unsaved.incrementAndGet();
-        pending.saves.add(CompletableFuture.runAsync(() -> {
-            try(image) {
-                Files.createDirectories(file.getParent());
-                image.writeToFile(file);
-            } catch(IOException e) {
-                throw new UncheckedIOException(e);
-            } finally {
-                pending.unsaved.decrementAndGet();
-            }
-        }, SCREENSHOT_WRITERS));
-        if(pending.times.size() < pending.files.size()) return;
+        pending.saves.add(CompletableFuture.runAsync(
+                () -> {
+                    try (image) {
+                        Files.createDirectories(file.getParent());
+                        image.writeToFile(file);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    } finally {
+                        pending.unsaved.decrementAndGet();
+                    }
+                },
+                SCREENSHOT_WRITERS));
+        if (pending.times.size() < pending.files.size()) return;
         screenshot = null;
         minecraft.options.hideGui = pending.hideGuiBefore;
         CompletableFuture.allOf(pending.saves.toArray(CompletableFuture[]::new)).whenComplete((done, error) -> {
-            if(error != null) pending.result.completeExceptionally(error);
+            if (error != null) pending.result.completeExceptionally(error);
             else pending.result.complete(pending.files);
         });
     }
@@ -203,45 +234,69 @@ public final class DevTools {
     // ---- Actions behind the control API. Each returns a JSON response body. ----
 
     static JsonObject reload(String worktree, boolean full) throws Exception {
-        if(worktree != null && !samePath(worktree, WORKTREE))
-            return failure("This game was launched from " + WORKTREE + ", not " + worktree + ". Close it and press Launch Minecraft in this worktree to try these changes.");
+        if (worktree != null && !samePath(worktree, WORKTREE))
+            return DevApi.failure("This game was launched from " + WORKTREE + ", not " + worktree
+                    + ". Close it and press Launch Minecraft in this worktree to try these changes.");
         Instrumentation instrumentation = instrumentation();
-        if(instrumentation == null) return failure("The dev agent is not attached. Close Minecraft and press Launch Minecraft to try these changes.");
+        if (instrumentation == null)
+            return DevApi.failure(
+                    "The dev agent is not attached. Close Minecraft and press Launch Minecraft to try these changes.");
         HotReloader.Result result = RELOADER.reload(instrumentation, DevTools.class.getClassLoader());
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
         List<String> details = new ArrayList<>();
-        if(!result.redefined().isEmpty()) details.add("Hot-swapped " + count(result.redefined().size(), "class") + ": " + simpleNames(result.redefined()));
-        if(!result.notYetLoaded().isEmpty()) details.add(count(result.notYetLoaded().size(), "new or unused class") + " will load on first use: " + simpleNames(result.notYetLoaded()));
-        boolean data = full || !result.changes().data().isEmpty(), assets = full || !result.changes().assets().isEmpty();
-        if(data && server != null) {
+        if (!result.redefined().isEmpty())
+            details.add("Hot-swapped " + count(result.redefined().size(), "class") + ": "
+                    + simpleNames(result.redefined()));
+        if (!result.notYetLoaded().isEmpty())
+            details.add(count(result.notYetLoaded().size(), "new or unused class") + " will load on first use: "
+                    + simpleNames(result.notYetLoaded()));
+        boolean data = full || !result.changes().data().isEmpty(),
+                assets = full || !result.changes().assets().isEmpty();
+        if (data && server != null) {
             server.submit(() -> {
-                server.getPackRepository().reload();
-                return server.reloadResources(server.getPackRepository().getSelectedIds());
-            }).get(1, TimeUnit.MINUTES).get(3, TimeUnit.MINUTES);
+                        server.getPackRepository().reload();
+                        return server.reloadResources(server.getPackRepository().getSelectedIds());
+                    })
+                    .get(1, TimeUnit.MINUTES)
+                    .get(3, TimeUnit.MINUTES);
             details.add("Reloaded data packs (" + count(result.changes().data().size(), "changed file") + ")");
-        } else if(data) details.add("Data changed; it will load when you join a world");
-        if(assets) {
-            minecraft.submit(minecraft::reloadResourcePacks).get(1, TimeUnit.MINUTES).get(3, TimeUnit.MINUTES);
+        } else if (data) details.add("Data changed; it will load when you join a world");
+        if (assets) {
+            minecraft
+                    .submit(minecraft::reloadResourcePacks)
+                    .get(1, TimeUnit.MINUTES)
+                    .get(3, TimeUnit.MINUTES);
             details.add("Reloaded assets (" + count(result.changes().assets().size(), "changed file") + ")");
         }
         result.restartReasons().forEach(reason -> details.add("Needs restart: " + reason));
 
         String status, message;
-        if(!result.restartReasons().isEmpty()) {
+        if (!result.restartReasons().isEmpty()) {
             status = "restart-required";
             message = "Restart Minecraft to try these changes.";
-        } else if(result.changes().isEmpty() && !full) {
+        } else if (result.changes().isEmpty() && !full) {
             status = "no-changes";
             message = "The game already runs this code.";
         } else {
             status = "reloaded";
-            message = RELOADED;
+            message = "Reloaded the changes.";
         }
         minecraft.execute(() -> {
-            ChatFormatting color = status.equals("reloaded") ? ChatFormatting.GREEN : status.equals("no-changes") ? ChatFormatting.GRAY : ChatFormatting.GOLD;
-            minecraft.gui.getChat().addMessage(Component.literal("[Dev] ").withStyle(ChatFormatting.DARK_AQUA).append(Component.literal(message).withStyle(color)));
-            for(String line : details) minecraft.gui.getChat().addMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
+            ChatFormatting color = status.equals("reloaded")
+                    ? ChatFormatting.GREEN
+                    : status.equals("no-changes") ? ChatFormatting.GRAY : ChatFormatting.GOLD;
+            minecraft
+                    .gui
+                    .getChat()
+                    .addMessage(Component.literal("[Dev] ")
+                            .withStyle(ChatFormatting.DARK_AQUA)
+                            .append(Component.literal(message).withStyle(color)));
+            for (String line : details)
+                minecraft
+                        .gui
+                        .getChat()
+                        .addMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
         });
         JsonObject response = new JsonObject();
         response.addProperty("ok", true);
@@ -257,11 +312,24 @@ public final class DevTools {
             JsonObject status = new JsonObject();
             status.addProperty("ok", true);
             status.addProperty("worktree", WORKTREE);
-            status.addProperty("gameDirectory", minecraft.gameDirectory.toPath().toAbsolutePath().normalize().toString());
+            status.addProperty(
+                    "gameDirectory",
+                    minecraft
+                            .gameDirectory
+                            .toPath()
+                            .toAbsolutePath()
+                            .normalize()
+                            .toString());
             MinecraftServer server = minecraft.getSingleplayerServer();
-            status.addProperty("world", server == null ? null : server.getWorldData().getLevelName());
-            if(server == null && minecraft.getCurrentServer() != null) status.addProperty("server", minecraft.getCurrentServer().ip);
-            status.addProperty("screen", minecraft.screen == null ? null : minecraft.screen.getClass().getName());
+            status.addProperty(
+                    "world", server == null ? null : server.getWorldData().getLevelName());
+            if (server == null && minecraft.getCurrentServer() != null)
+                status.addProperty("server", minecraft.getCurrentServer().ip);
+            status.addProperty(
+                    "screen",
+                    minecraft.screen == null
+                            ? null
+                            : minecraft.screen.getClass().getName());
             status.addProperty("fps", minecraft.getFps());
             status.addProperty("hidden", DevInstance.hidden());
             Window window = minecraft.getWindow();
@@ -271,19 +339,29 @@ public final class DevTools {
             windowJson.addProperty("guiScale", window.getGuiScale());
             status.add("window", windowJson);
             status.add("held", DevInput.held());
-            status.addProperty("evidenceDirectory", slashes(evidenceDirectory()));
-            if(minecraft.player != null) {
+            status.addProperty("evidenceDirectory", slashes(EVIDENCE));
+            if (minecraft.player != null) {
                 JsonObject player = new JsonObject();
                 player.addProperty("name", minecraft.player.getGameProfile().getName());
-                player.addProperty("x", round(minecraft.player.getX()));
-                player.addProperty("y", round(minecraft.player.getY()));
-                player.addProperty("z", round(minecraft.player.getZ()));
-                player.addProperty("yaw", round(minecraft.player.getYRot()));
-                player.addProperty("pitch", round(minecraft.player.getXRot()));
-                player.addProperty("dimension", minecraft.player.level().dimension().location().toString());
+                player.addProperty("x", DevApi.round(minecraft.player.getX()));
+                player.addProperty("y", DevApi.round(minecraft.player.getY()));
+                player.addProperty("z", DevApi.round(minecraft.player.getZ()));
+                player.addProperty("yaw", DevApi.round(minecraft.player.getYRot()));
+                player.addProperty("pitch", DevApi.round(minecraft.player.getXRot()));
+                player.addProperty(
+                        "dimension",
+                        minecraft.player.level().dimension().location().toString());
                 player.addProperty("sneaking", minecraft.player.isShiftKeyDown());
-                player.addProperty("gameMode", minecraft.gameMode == null ? null : minecraft.gameMode.getPlayerMode().getName());
-                player.addProperty("mainHand", BuiltInRegistries.ITEM.getKey(minecraft.player.getMainHandItem().getItem()) + " x" + minecraft.player.getMainHandItem().getCount());
+                player.addProperty(
+                        "gameMode",
+                        minecraft.gameMode == null
+                                ? null
+                                : minecraft.gameMode.getPlayerMode().getName());
+                player.addProperty(
+                        "mainHand",
+                        BuiltInRegistries.ITEM.getKey(
+                                        minecraft.player.getMainHandItem().getItem()) + " x"
+                                + minecraft.player.getMainHandItem().getCount());
                 player.addProperty("selectedSlot", minecraft.player.getInventory().selected);
                 status.add("player", player);
                 status.add("target", describe(minecraft.hitResult));
@@ -301,39 +379,47 @@ public final class DevTools {
     static JsonObject command(String body) throws Exception {
         boolean batch = body.strip().startsWith("[");
         List<JsonElement> steps = new ArrayList<>();
-        if(batch) JsonParser.parseString(body).getAsJsonArray().forEach(steps::add);
+        if (batch) JsonParser.parseString(body).getAsJsonArray().forEach(steps::add);
         else steps.add(new JsonPrimitive(body));
-        if(Minecraft.getInstance().player == null) return failure("Not in a world.");
+        if (Minecraft.getInstance().player == null) return DevApi.failure("Not in a world.");
         JsonArray results = new JsonArray();
         boolean ok = true;
-        for(int i = 0; i < steps.size(); i++) {
+        for (int i = 0; i < steps.size(); i++) {
             JsonElement step = steps.get(i);
-            if(step.isJsonPrimitive()) {
+            if (step.isJsonPrimitive()) {
                 List<String> commands = new ArrayList<>();
-                for(; i < steps.size() && steps.get(i).isJsonPrimitive(); i++) commands.add(steps.get(i).getAsString());
+                for (; i < steps.size() && steps.get(i).isJsonPrimitive(); i++)
+                    commands.add(steps.get(i).getAsString());
                 i--;
-                for(JsonObject result : runCommands(commands, batch)) {
+                for (JsonObject result : runCommands(commands, batch)) {
                     ok &= result.get("ok").getAsBoolean();
                     results.add(result);
                 }
                 continue;
             }
             JsonObject wait = step.getAsJsonObject(), result = new JsonObject();
-            if(wait.has("waitTicks")) {
+            if (wait.has("waitTicks")) {
                 int ticks = wait.get("waitTicks").getAsInt();
                 waitTicks(ticks);
                 result.addProperty("waitTicks", ticks);
                 result.addProperty("ok", true);
-            } else if(wait.has("call")) {
-                JsonObject called = DevControlServer.call(wait.get("call").getAsString(), wait.has("body") ? wait.get("body").getAsString() : "");
+            } else if (wait.has("call")) {
+                JsonObject called = DevControlServer.call(
+                        wait.get("call").getAsString(),
+                        wait.has("body") ? wait.get("body").getAsString() : "");
                 result.addProperty("call", wait.get("call").getAsString());
                 result.addProperty("ok", called.get("ok").getAsBoolean());
                 result.add("result", called);
-            } else if(wait.has("waitUntil")) {
+            } else if (wait.has("waitUntil")) {
                 String command = wait.get("waitUntil").getAsString();
-                int timeout = wait.has("timeoutTicks") ? wait.get("timeoutTicks").getAsInt() : 200, waited = 0;
+                int
+                        timeout =
+                                wait.has("timeoutTicks")
+                                        ? wait.get("timeoutTicks").getAsInt()
+                                        : 200,
+                        waited = 0;
                 JsonObject attempt = runCommands(List.of(command), false).get(0);
-                while(!attempt.get("ok").getAsBoolean() && waited < timeout) {
+                while (!attempt.get("ok").getAsBoolean() && waited < timeout) {
                     waitTicks(1);
                     waited++;
                     attempt = runCommands(List.of(command), false).get(0);
@@ -342,15 +428,17 @@ public final class DevTools {
                 result.addProperty("ok", attempt.get("ok").getAsBoolean());
                 result.addProperty("ticks", waited);
                 result.add("output", attempt.get("output"));
-            } else throw new IllegalArgumentException("Unknown step " + wait + "; use a command, waitTicks, waitUntil or call.");
+            } else
+                throw new IllegalArgumentException(
+                        "Unknown step " + wait + "; use a command, waitTicks, waitUntil or call.");
             results.add(result);
-            if(!result.get("ok").getAsBoolean()) {
+            if (!result.get("ok").getAsBoolean()) {
                 ok = false;
                 result.addProperty("skippedSteps", steps.size() - i - 1);
                 break;
             }
         }
-        if(!batch) return results.get(0).getAsJsonObject();
+        if (!batch) return results.get(0).getAsJsonObject();
         JsonObject response = new JsonObject();
         response.addProperty("ok", ok);
         response.add("results", results);
@@ -361,16 +449,16 @@ public final class DevTools {
     private static List<JsonObject> runCommands(List<String> commands, boolean echo) throws Exception {
         List<JsonObject> done = new ArrayList<>();
         List<String> forServer = new ArrayList<>();
-        for(String command : commands) {
+        for (String command : commands) {
             String text = command.strip().startsWith("/") ? command.strip().substring(1) : command.strip();
-            if(!isClientCommand(text)) {
+            if (!isClientCommand(text)) {
                 forServer.add(text);
                 continue;
             }
             done.addAll(runServerCommands(forServer, echo));
             forServer.clear();
             JsonObject result = runClientCommand(text, echo);
-            if(result != null) done.add(result);
+            if (result != null) done.add(result);
             else forServer.add(text);
         }
         done.addAll(runServerCommands(forServer, echo));
@@ -394,31 +482,23 @@ public final class DevTools {
     private static JsonObject chatResult(String text, boolean echo, GuiMessage mark) {
         List<Component> added = DevScreens.since(mark);
         JsonObject response = new JsonObject();
-        if(echo) response.addProperty("command", text);
+        if (echo) response.addProperty("command", text);
         response.addProperty("ok", added.stream().noneMatch(DevScreens::failed));
         response.add("output", strings(added.stream().map(Component::getString).toList()));
         return response;
     }
 
     private static List<JsonObject> runServerCommands(List<String> commands, boolean echo) throws Exception {
-        if(commands.isEmpty()) return List.of();
-        Minecraft minecraft = Minecraft.getInstance();
-        MinecraftServer server = minecraft.getSingleplayerServer();
         List<JsonObject> done = new ArrayList<>();
-        if(server == null) {
-            for(String text : commands) done.add(runRemoteCommand(text, echo));
+        if (commands.isEmpty()) return done;
+        if (Minecraft.getInstance().getSingleplayerServer() == null) {
+            for (String text : commands) done.add(runRemoteCommand(text, echo));
             return done;
         }
-        UUID id = minecraft.player.getUUID();
-        return server.submit(() -> {
-            ServerPlayer player = server.getPlayerList().getPlayer(id);
-            for(String command : commands) {
-                long start = System.nanoTime();
-                done.add(runCommand(server, player, command, echo));
-                DevRecorder.log("/" + command, (System.nanoTime() - start) / 1_000_000);
-            }
+        return onServer((server, player) -> {
+            for (String command : commands) done.add(runCommand(server, player, command, echo));
             return done;
-        }).get(1, TimeUnit.MINUTES);
+        });
     }
 
     /**
@@ -439,29 +519,32 @@ public final class DevTools {
     private static void waitTicks(int ticks) throws Exception {
         Minecraft minecraft = Minecraft.getInstance();
         MinecraftServer server = minecraft.getSingleplayerServer();
-        if(server == null || minecraft.isPaused()) {
+        if (server == null || minecraft.isPaused()) {
             DevInput.waitClientTicks(ticks);
             return;
         }
-        if(ticks < 0 || ticks > 1200) throw new IllegalArgumentException("Wait 0-1200 ticks.");
+        if (ticks < 0 || ticks > 1200) throw new IllegalArgumentException("Wait 0-1200 ticks.");
         int target = server.submit(server::getTickCount).get(1, TimeUnit.MINUTES) + ticks;
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(5_000 + ticks * 250L);
-        while(server.getTickCount() < target) {
+        while (server.getTickCount() < target) {
             // A pausing screen, such as Ponder's, can open during the wait.
-            if(minecraft.isPaused()) {
+            if (minecraft.isPaused()) {
                 DevInput.waitClientTicks(target - server.getTickCount());
                 return;
             }
-            if(System.nanoTime() > deadline) throw new IllegalStateException("The server stopped ticking. Is the pause menu open, or is the game frozen with /tick freeze?");
+            if (System.nanoTime() > deadline)
+                throw new IllegalStateException(
+                        "The server stopped ticking. Is the pause menu open, or is the game frozen with /tick freeze?");
             Thread.sleep(5);
         }
     }
 
     private static JsonObject runCommand(MinecraftServer server, ServerPlayer player, String text, boolean echo) {
         // A player who isn't flying falls after a teleport, which spoils the view it was meant to set up.
-        if(text.startsWith("tp ") || text.startsWith("teleport ")) DevCamera.keepFlying(player);
-        JsonObject result = DevPlayers.run(server, player.createCommandSourceStack().withPermission(4), text);
-        if(!echo) return result;
+        if (text.startsWith("tp ") || text.startsWith("teleport ")) DevCamera.keepFlying(player);
+        JsonObject result =
+                DevPlayers.run(server, player.createCommandSourceStack().withPermission(4), text);
+        if (!echo) return result;
         JsonObject response = new JsonObject();
         response.addProperty("command", text);
         result.entrySet().forEach(entry -> response.add(entry.getKey(), entry.getValue()));
@@ -475,43 +558,61 @@ public final class DevTools {
      * open chat is closed first; any other open screen is named in {@code screen}, since it still shows. {@code keep}
      * also copies the result, under that name, to the evidence folder. {@code audio} records the game's sound into an MP4.
      */
-    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video, String keep, boolean audio) throws Exception {
-        if(frames < 1 || frames > 600 || intervalMs < 0 || intervalMs > 10_000) return failure("Use 1-600 frames and an interval of 0-10000 ms.");
-        if(video != null && frames < 2) return failure("A video needs at least 2 frames.");
-        if(audio && !"mp4".equalsIgnoreCase(video)) return failure("Sound needs video=mp4; a GIF has no soundtrack.");
+    static JsonObject screenshot(boolean hud, int frames, int intervalMs, String video, String keep, boolean audio)
+            throws Exception {
+        if (frames < 1 || frames > 600 || intervalMs < 0 || intervalMs > 10_000)
+            return DevApi.failure("Use 1-600 frames and an interval of 0-10000 ms.");
+        if (video != null && frames < 2) return DevApi.failure("A video needs at least 2 frames.");
+        if (audio && !"mp4".equalsIgnoreCase(video))
+            return DevApi.failure("Sound needs video=mp4; a GIF has no soundtrack.");
         Minecraft minecraft = Minecraft.getInstance();
-        String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS"));
-        Path folder = minecraft.gameDirectory.toPath().resolve("screenshots/dev-tools").toAbsolutePath().normalize();
+        Path sequence = scratchFile("");
         List<Path> files = new ArrayList<>();
-        if(frames == 1) files.add(folder.resolve(name + ".png"));
-        else for(int i = 0; i < frames; i++) files.add(folder.resolve(name).resolve(String.format("frame-%03d.png", i)));
+        if (frames == 1) files.add(sequence.resolveSibling(sequence.getFileName() + ".png"));
+        else for (int i = 0; i < frames; i++) files.add(sequence.resolve(String.format("frame-%03d.png", i)));
         PendingScreenshot pending = new PendingScreenshot(files, intervalMs * 1_000_000L);
         long audioStart = audio ? DevAudio.start() : 0;
-        String screen = minecraft.submit(() -> {
-            if(!hud && minecraft.screen instanceof ChatScreen) minecraft.setScreen(null);
-            pending.hideGuiBefore = minecraft.options.hideGui;
-            minecraft.options.hideGui = !hud;
-            screenshot = pending;
-            return minecraft.screen == null ? null : minecraft.screen.getClass().getSimpleName();
-        }).get(1, TimeUnit.MINUTES);
+        String screen = minecraft
+                .submit(() -> {
+                    if (!hud && minecraft.screen instanceof ChatScreen) minecraft.setScreen(null);
+                    pending.hideGuiBefore = minecraft.options.hideGui;
+                    minecraft.options.hideGui = !hud;
+                    screenshot = pending;
+                    return minecraft.screen == null
+                            ? null
+                            : minecraft.screen.getClass().getSimpleName();
+                })
+                .get(1, TimeUnit.MINUTES);
         Path recording;
         try {
-            pending.result.get(30 + (long)frames * intervalMs / 1000, TimeUnit.SECONDS);
+            pending.result.get(30 + (long) frames * intervalMs / 1000, TimeUnit.SECONDS);
         } finally {
             recording = audio ? DevAudio.stop() : null;
+            // A capture that timed out, for example because the window is minimized, would otherwise stay pending and
+            // keep the HUD hidden.
+            if (!pending.result.isDone())
+                minecraft.execute(() -> {
+                    if (screenshot != pending) return;
+                    screenshot = null;
+                    minecraft.options.hideGui = pending.hideGuiBefore;
+                });
         }
         JsonObject response = new JsonObject();
         response.addProperty("ok", true);
-        if(screen != null) response.addProperty("screen", screen);
-        if(frames == 1) {
+        if (screen != null) response.addProperty("screen", screen);
+        if (frames == 1) {
             response.addProperty("path", files.get(0).toString());
-            if(keep != null) keep(keep, List.of(files.get(0)), response);
+            if (keep != null) keep(keep, List.of(files.get(0)), response);
             return response;
         }
         List<Integer> sheetFrames = new ArrayList<>();
-        for(int i = 0, shown = Math.min(frames, SHEET_FRAMES); i < shown; i++) sheetFrames.add(shown == frames ? i : (int)Math.round(i * (frames - 1.0) / (shown - 1)));
-        response.addProperty("sheet", contactSheet(sheetFrames.stream().map(files::get).toList(), folder.resolve(name).resolve("sheet.png")).toString());
-        if(sheetFrames.size() < frames) {
+        for (int i = 0, shown = Math.min(frames, SHEET_FRAMES); i < shown; i++)
+            sheetFrames.add(shown == frames ? i : (int) Math.round(i * (frames - 1.0) / (shown - 1)));
+        response.addProperty(
+                "sheet",
+                contactSheet(sheetFrames.stream().map(files::get).toList(), sequence.resolve("sheet.png"))
+                        .toString());
+        if (sheetFrames.size() < frames) {
             JsonArray shown = new JsonArray();
             sheetFrames.forEach(shown::add);
             response.add("sheetFrames", shown);
@@ -522,43 +623,47 @@ public final class DevTools {
         pending.gameTimes.forEach(time -> gameTimes.add(Math.round(time * 1000) / 1000.0));
         response.add("timesMs", times);
         response.add("gameTimes", gameTimes);
-        if(video != null) {
+        if (video != null) {
             try {
-                response.addProperty("video", DevVideo.encode(files, pending.times, video, recording, (pending.start - audioStart) / 1e9).toString());
-            } catch(IOException | IllegalArgumentException e) {
+                response.addProperty(
+                        "video",
+                        DevVideo.encode(files, pending.times, video, recording, (pending.start - audioStart) / 1e9)
+                                .toString());
+            } catch (IOException | IllegalArgumentException e) {
                 response.addProperty("videoError", e.getMessage());
             }
         }
-        if(keep != null) {
+        if (keep != null) {
             List<Path> kept = new ArrayList<>();
-            if(response.has("video")) kept.add(Path.of(response.get("video").getAsString()));
+            if (response.has("video")) kept.add(Path.of(response.get("video").getAsString()));
             kept.add(Path.of(response.get("sheet").getAsString()));
             keep(keep, kept, response);
         }
         return response;
     }
 
-    /**
-     * Where images shown in chat live. Chat embeds a file by its path and reads it from disk each time it's displayed,
-     * so a deleted file shows up broken. This folder is outside the worktree and its game folder, which both go away
-     * when the worktree is removed.
-     */
-    static Path evidenceDirectory() {
-        Path game = Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize();
-        return DevInstance.WORKTREE_INSTANCE ? game.getParent().getParent().resolve("evidence").resolve(game.getFileName()) : game.resolve("evidence").resolve("main");
+    /** A new path named after the current time in the game's folder for scratch captures. */
+    static Path scratchFile(String extension) {
+        return Minecraft.getInstance()
+                .gameDirectory
+                .toPath()
+                .resolve("screenshots/dev-tools")
+                .toAbsolutePath()
+                .normalize()
+                .resolve(
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH.mm.ss.SSS")) + extension);
     }
 
     /** Copies a capture to the evidence folder, never over an earlier one, since chat may already show that file. */
     static void keep(String label, List<Path> captures, JsonObject response) throws IOException {
-        Path folder = evidenceDirectory();
-        Files.createDirectories(folder);
+        Files.createDirectories(EVIDENCE);
         String name = label.replaceAll("[^a-zA-Z0-9._-]", "-");
         JsonArray kept = new JsonArray(), markdown = new JsonArray();
-        for(Path capture : captures) {
+        for (Path capture : captures) {
             String file = capture.getFileName().toString(), extension = file.substring(file.lastIndexOf('.'));
             String suffix = file.startsWith("sheet.") && captures.size() > 1 ? "-sheet" : "";
-            Path target = folder.resolve(name + suffix + extension);
-            for(int i = 2; Files.exists(target); i++) target = folder.resolve(name + suffix + "-" + i + extension);
+            Path target = EVIDENCE.resolve(name + suffix + extension);
+            for (int i = 2; Files.exists(target); i++) target = EVIDENCE.resolve(name + suffix + "-" + i + extension);
             Files.copy(capture, target, StandardCopyOption.COPY_ATTRIBUTES);
             kept.add(slashes(target));
             markdown.add("![" + label + "](" + slashes(target) + ")");
@@ -577,28 +682,34 @@ public final class DevTools {
      * frame at a time, so long sequences don't hold every full-size frame in memory.
      */
     private static Path contactSheet(List<Path> frames, Path sheet) throws IOException {
-        int columns = (int)Math.ceil(Math.sqrt(frames.size())), rows = (frames.size() + columns - 1) / columns, gap = 4;
+        int columns = (int) Math.ceil(Math.sqrt(frames.size())),
+                rows = (frames.size() + columns - 1) / columns,
+                gap = 4;
         NativeImage out = null;
         try {
             double scale = 1;
             int cellWidth = 0, cellHeight = 0;
-            for(int i = 0; i < frames.size(); i++) {
-                try(var in = Files.newInputStream(frames.get(i)); NativeImage image = NativeImage.read(in)) {
-                    if(out == null) {
+            for (int i = 0; i < frames.size(); i++) {
+                try (var in = Files.newInputStream(frames.get(i));
+                        NativeImage image = NativeImage.read(in)) {
+                    if (out == null) {
                         scale = Math.min(1, (1600.0 - gap * (columns - 1)) / columns / image.getWidth());
-                        cellWidth = (int)(image.getWidth() * scale);
-                        cellHeight = (int)(image.getHeight() * scale);
-                        out = new NativeImage(columns * cellWidth + gap * (columns - 1), rows * cellHeight + gap * (rows - 1), true);
+                        cellWidth = (int) (image.getWidth() * scale);
+                        cellHeight = (int) (image.getHeight() * scale);
+                        out = new NativeImage(
+                                columns * cellWidth + gap * (columns - 1), rows * cellHeight + gap * (rows - 1), true);
                         out.fillRect(0, 0, out.getWidth(), out.getHeight(), 0xFF000000);
                     }
                     int left = i % columns * (cellWidth + gap), top = i / columns * (cellHeight + gap);
-                    for(int y = 0; y < cellHeight; y++) for(int x = 0; x < cellWidth; x++)
-                        out.setPixelRGBA(left + x, top + y, image.getPixelRGBA((int)(x / scale), (int)(y / scale)));
+                    for (int y = 0; y < cellHeight; y++)
+                        for (int x = 0; x < cellWidth; x++)
+                            out.setPixelRGBA(
+                                    left + x, top + y, image.getPixelRGBA((int) (x / scale), (int) (y / scale)));
                 }
             }
             out.writeToFile(sheet);
         } finally {
-            if(out != null) out.close();
+            if (out != null) out.close();
         }
         return sheet;
     }
@@ -606,48 +717,71 @@ public final class DevTools {
     /** Right-clicks (use) or left-clicks (attack) the crosshair target, or the given block face when coordinates are passed. */
     static JsonObject interact(boolean use, Map<String, String> query) throws Exception {
         DevInput.awaitHeld(query.get("holding"));
-        return DevInput.withModifiers(query.get("mods"), () -> onClient(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            if(minecraft.player == null || minecraft.gameMode == null) return failure("Not in a world.");
-            HitResult target = minecraft.hitResult;
-            if(query.containsKey("entity")) {
-                var entity = minecraft.level.getEntity(Integer.parseInt(query.get("entity")));
-                if(entity == null) return failure("No entity with that id is loaded.");
-                target = new EntityHitResult(entity, entity.getBoundingBox().getCenter());
-            } else if(query.containsKey("x")) {
-                BlockPos pos = new BlockPos(Integer.parseInt(query.get("x")), Integer.parseInt(query.get("y")), Integer.parseInt(query.get("z")));
-                Direction face = Direction.byName(query.getOrDefault("face", "up"));
-                if(face == null) return failure("Unknown face; use up, down, north, south, east or west.");
-                target = new BlockHitResult(Vec3.atCenterOf(pos).add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5)), face, pos, false);
-            }
-            var player = minecraft.player;
-            String outcome;
-            if(use) {
-                InteractionResult result = switch(target == null ? HitResult.Type.MISS : target.getType()) {
-                    case BLOCK -> minecraft.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, (BlockHitResult)target);
-                    case ENTITY -> {
-                        // In this order, as a real click does; armor stands and others only answer the first.
-                        EntityHitResult hit = (EntityHitResult)target;
-                        InteractionResult at = minecraft.gameMode.interactAt(player, hit.getEntity(), hit, InteractionHand.MAIN_HAND);
-                        yield at.consumesAction() ? at : minecraft.gameMode.interact(player, hit.getEntity(), InteractionHand.MAIN_HAND);
+        return DevInput.withModifiers(
+                query.get("mods"),
+                () -> onClient(() -> {
+                    Minecraft minecraft = Minecraft.getInstance();
+                    if (minecraft.player == null || minecraft.gameMode == null)
+                        return DevApi.failure("Not in a world.");
+                    HitResult target = minecraft.hitResult;
+                    if (query.containsKey("entity")) {
+                        var entity = minecraft.level.getEntity(Integer.parseInt(query.get("entity")));
+                        if (entity == null) return DevApi.failure("No entity with that id is loaded.");
+                        target = new EntityHitResult(
+                                entity, entity.getBoundingBox().getCenter());
+                    } else if (query.containsKey("x")) {
+                        BlockPos pos = DevApi.blockPos(query);
+                        Direction face = Direction.byName(query.getOrDefault("face", "up"));
+                        if (face == null)
+                            return DevApi.failure("Unknown face; use up, down, north, south, east or west.");
+                        target = new BlockHitResult(
+                                Vec3.atCenterOf(pos)
+                                        .add(Vec3.atLowerCornerOf(face.getNormal())
+                                                .scale(0.5)),
+                                face,
+                                pos,
+                                false);
                     }
-                    case MISS -> InteractionResult.PASS;
-                };
-                if(!result.consumesAction()) result = minecraft.gameMode.useItem(player, InteractionHand.MAIN_HAND);
-                if(result.shouldSwing()) player.swing(InteractionHand.MAIN_HAND);
-                outcome = result.toString();
-            } else {
-                if(target instanceof BlockHitResult block && target.getType() == HitResult.Type.BLOCK) outcome = minecraft.gameMode.startDestroyBlock(block.getBlockPos(), block.getDirection()) ? "BROKEN" : "STARTED";
-                else if(target instanceof EntityHitResult entity) { minecraft.gameMode.attack(player, entity.getEntity()); outcome = "ATTACKED"; }
-                else outcome = "MISS";
-                player.swing(InteractionHand.MAIN_HAND);
-            }
-            JsonObject response = new JsonObject();
-            response.addProperty("ok", true);
-            response.addProperty("result", outcome);
-            response.add("target", describe(target));
-            return response;
-        }));
+                    var player = minecraft.player;
+                    String outcome;
+                    if (use) {
+                        InteractionResult result = switch (target == null ? HitResult.Type.MISS : target.getType()) {
+                            case BLOCK ->
+                                minecraft.gameMode.useItemOn(
+                                        player, InteractionHand.MAIN_HAND, (BlockHitResult) target);
+                            case ENTITY -> {
+                                // In this order, as a real click does; armor stands and others only answer the first.
+                                EntityHitResult hit = (EntityHitResult) target;
+                                InteractionResult at = minecraft.gameMode.interactAt(
+                                        player, hit.getEntity(), hit, InteractionHand.MAIN_HAND);
+                                yield at.consumesAction()
+                                        ? at
+                                        : minecraft.gameMode.interact(
+                                                player, hit.getEntity(), InteractionHand.MAIN_HAND);
+                            }
+                            case MISS -> InteractionResult.PASS;
+                        };
+                        if (!result.consumesAction())
+                            result = minecraft.gameMode.useItem(player, InteractionHand.MAIN_HAND);
+                        if (result.shouldSwing()) player.swing(InteractionHand.MAIN_HAND);
+                        outcome = result.toString();
+                    } else {
+                        if (target instanceof BlockHitResult block && target.getType() == HitResult.Type.BLOCK)
+                            outcome = minecraft.gameMode.startDestroyBlock(block.getBlockPos(), block.getDirection())
+                                    ? "BROKEN"
+                                    : "STARTED";
+                        else if (target instanceof EntityHitResult entity) {
+                            minecraft.gameMode.attack(player, entity.getEntity());
+                            outcome = "ATTACKED";
+                        } else outcome = "MISS";
+                        player.swing(InteractionHand.MAIN_HAND);
+                    }
+                    JsonObject response = new JsonObject();
+                    response.addProperty("ok", true);
+                    response.addProperty("result", outcome);
+                    response.add("target", describe(target));
+                    return response;
+                }));
     }
 
     // ---- Helpers ----
@@ -661,23 +795,37 @@ public final class DevTools {
         final CompletableFuture<List<Path>> result = new CompletableFuture<>();
         /** Lets the hidden or restored HUD reach a rendered frame before capturing. */
         int framesToWait = 2;
+
         long start;
         boolean hideGuiBefore;
-        PendingScreenshot(List<Path> files, long intervalNanos) { this.files = files; this.intervalNanos = intervalNanos; }
+
+        PendingScreenshot(List<Path> files, long intervalNanos) {
+            this.files = files;
+            this.intervalNanos = intervalNanos;
+        }
     }
 
     static JsonObject describe(HitResult target) {
         JsonObject json = new JsonObject();
-        if(target instanceof BlockHitResult block && target.getType() == HitResult.Type.BLOCK) {
+        if (target instanceof BlockHitResult block && target.getType() == HitResult.Type.BLOCK) {
             json.addProperty("type", "block");
             BlockPos pos = block.getBlockPos();
-            json.addProperty("pos", pos.getX() + " " + pos.getY() + " " + pos.getZ());
+            json.addProperty("pos", DevApi.position(pos));
             json.addProperty("face", block.getDirection().getName());
             var level = Minecraft.getInstance().level;
-            if(level != null) json.addProperty("block", BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString());
-        } else if(target instanceof EntityHitResult entity) {
+            if (level != null)
+                json.addProperty(
+                        "block",
+                        BuiltInRegistries.BLOCK
+                                .getKey(level.getBlockState(pos).getBlock())
+                                .toString());
+        } else if (target instanceof EntityHitResult entity) {
             json.addProperty("type", "entity");
-            json.addProperty("entity", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getEntity().getType()).toString());
+            json.addProperty(
+                    "entity",
+                    BuiltInRegistries.ENTITY_TYPE
+                            .getKey(entity.getEntity().getType())
+                            .toString());
             json.addProperty("id", entity.getEntity().getId());
         } else json.addProperty("type", "miss");
         return json;
@@ -687,52 +835,59 @@ public final class DevTools {
         return Minecraft.getInstance().submit(action).get(1, TimeUnit.MINUTES);
     }
 
-    static JsonObject ok() {
-        JsonObject json = new JsonObject();
-        json.addProperty("ok", true);
-        return json;
-    }
-
-    static JsonObject failure(String message) {
-        JsonObject json = new JsonObject();
-        json.addProperty("ok", false);
-        json.addProperty("status", "error");
-        json.addProperty("message", message);
-        return json;
+    /** Runs on the integrated server's thread, with the server's copy of the client's player, and waits for it. */
+    static <T> T onServer(BiFunction<MinecraftServer, ServerPlayer, T> action) throws Exception {
+        Minecraft minecraft = Minecraft.getInstance();
+        MinecraftServer server = minecraft.getSingleplayerServer();
+        if (server == null || minecraft.player == null)
+            throw new IllegalStateException("Not in a single-player world.");
+        UUID id = minecraft.player.getUUID();
+        return server.submit(() -> action.apply(server, server.getPlayerList().getPlayer(id)))
+                .get(1, TimeUnit.MINUTES);
     }
 
     private static JsonArray strings(Collection<String> values) {
         JsonArray array = new JsonArray();
-        synchronized(values) { values.forEach(array::add); }
+        values.forEach(array::add);
         return array;
     }
 
     private static Instrumentation instrumentation() {
         try {
-            return (Instrumentation)ClassLoader.getSystemClassLoader().loadClass("com.zmm2025.createdisplayworks.devagent.DevAgent").getField("instrumentation").get(null);
-        } catch(ReflectiveOperationException e) {
+            return (Instrumentation) ClassLoader.getSystemClassLoader()
+                    .loadClass("com.zmm2025.createdisplayworks.devagent.DevAgent")
+                    .getField("instrumentation")
+                    .get(null);
+        } catch (ReflectiveOperationException e) {
             return null;
         }
     }
 
     private static List<Path> paths(String property) {
-        return Arrays.stream(System.getProperty(property, "").split(File.pathSeparator)).filter(s -> !s.isBlank()).map(Path::of).toList();
+        return Arrays.stream(System.getProperty(property, "").split(File.pathSeparator))
+                .filter(s -> !s.isBlank())
+                .map(Path::of)
+                .toList();
     }
 
     private static boolean samePath(String a, String b) {
-        try { return Path.of(a).toRealPath().equals(Path.of(b).toRealPath()); } catch(IOException e) { return a.equals(b); }
+        try {
+            return Path.of(a).toRealPath().equals(Path.of(b).toRealPath());
+        } catch (IOException e) {
+            return a.equals(b);
+        }
     }
 
     private static String simpleNames(List<String> names) {
-        return names.stream().map(n -> n.substring(n.lastIndexOf('.') + 1)).limit(8).reduce((a, b) -> a + ", " + b).orElse("")
-            + (names.size() > 8 ? ", ..." : "");
+        return names.stream()
+                        .map(n -> n.substring(n.lastIndexOf('.') + 1))
+                        .limit(8)
+                        .reduce((a, b) -> a + ", " + b)
+                        .orElse("")
+                + (names.size() > 8 ? ", ..." : "");
     }
 
     private static String count(int n, String noun) {
         return n + " " + noun + (n == 1 ? "" : noun.endsWith("s") ? "es" : "s");
-    }
-
-    static double round(double value) {
-        return Math.round(value * 100) / 100.0;
     }
 }

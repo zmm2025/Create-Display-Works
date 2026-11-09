@@ -1,79 +1,156 @@
 package com.zmm2025.createdisplayworks.flipdot;
 
+import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
+
+import com.simibubi.create.AllBlocks;
+import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
 import com.simibubi.create.content.equipment.wrench.IWrenchable;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 import com.simibubi.create.foundation.block.IBE;
-import com.zmm2025.createdisplayworks.ModContent;
+import com.zmm2025.createdisplayworks.ModBlockEntities;
+import com.zmm2025.createdisplayworks.ModBlocks;
+import com.zmm2025.createdisplayworks.media.MediaNetwork;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.function.Predicate;
+import net.createmod.catnip.placement.*;
 import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.*;
 import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.*;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.*;
-import net.minecraft.sounds.*;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
-import net.createmod.catnip.placement.*;
-import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.material.*;
-import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.*;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.level.BlockEvent;
 
-public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotBlockEntity>, ICogWheel, IWrenchable, SimpleWaterloggedBlock {
+public class FlipDotBlock extends HorizontalKineticBlock
+        implements IBE<FlipDotBlockEntity>, ICogWheel, IWrenchable, SimpleWaterloggedBlock {
     /** True when a display facing the same way continues the canvas on that side, which hides the border there. Left and right are as seen from the front. */
-    public static final BooleanProperty LEFT = BooleanProperty.create("left"), RIGHT = BooleanProperty.create("right"),
-        UP = BlockStateProperties.UP, DOWN = BlockStateProperties.DOWN;
+    public static final BooleanProperty LEFT = BooleanProperty.create("left"),
+            RIGHT = BooleanProperty.create("right"),
+            UP = BlockStateProperties.UP,
+            DOWN = BlockStateProperties.DOWN;
+
     private static final int PLACEMENT = PlacementHelpers.register(new IPlacementHelper() {
-        public java.util.function.Predicate<ItemStack> getItemPredicate() { return s -> s.is(ModContent.FLIP_DOT_ITEM.get()); }
-        public java.util.function.Predicate<BlockState> getStatePredicate() { return s -> s.is(ModContent.FLIP_DOT.get()); }
-        public PlacementOffset getOffset(Player player, Level level, BlockState state, BlockPos pos, BlockHitResult hit) {
-            var directions = IPlacementHelper.orderedByDistanceExceptAxis(pos, hit.getLocation(), state.getValue(HORIZONTAL_FACING).getAxis(),
-                d -> level.getBlockState(pos.relative(d)).canBeReplaced());
-            return directions.isEmpty() ? PlacementOffset.fail() : PlacementOffset.success(pos.relative(directions.getFirst()),
-                s -> s.setValue(HORIZONTAL_FACING, state.getValue(HORIZONTAL_FACING)));
+        public Predicate<ItemStack> getItemPredicate() {
+            return s -> ModBlocks.FLIP_DOT_DISPLAY.isIn(s);
+        }
+
+        public Predicate<BlockState> getStatePredicate() {
+            return s -> ModBlocks.FLIP_DOT_DISPLAY.has(s);
+        }
+
+        public PlacementOffset getOffset(
+                Player player, Level level, BlockState state, BlockPos pos, BlockHitResult hit) {
+            var directions = IPlacementHelper.orderedByDistanceExceptAxis(
+                    pos,
+                    hit.getLocation(),
+                    state.getValue(HORIZONTAL_FACING).getAxis(),
+                    d -> level.getBlockState(pos.relative(d)).canBeReplaced());
+            return directions.isEmpty()
+                    ? PlacementOffset.fail()
+                    : PlacementOffset.success(
+                            pos.relative(directions.getFirst()),
+                            s -> s.setValue(HORIZONTAL_FACING, state.getValue(HORIZONTAL_FACING)));
         }
     });
-    public FlipDotBlock(Properties properties) { super(properties); registerDefaultState(defaultBlockState().setValue(WATERLOGGED, false)
-        .setValue(LEFT, false).setValue(RIGHT, false).setValue(UP, false).setValue(DOWN, false)); }
-    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { super.createBlockStateDefinition(builder.add(WATERLOGGED, LEFT, RIGHT, UP, DOWN)); }
-    @Override public FluidState getFluidState(BlockState state) { return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : super.getFluidState(state); }
-    @Override public BlockState updateShape(BlockState state, Direction direction, BlockState neighbor, LevelAccessor level, BlockPos pos, BlockPos neighborPos) {
+
+    public FlipDotBlock(Properties properties) {
+        super(properties);
+        registerDefaultState(defaultBlockState()
+                .setValue(WATERLOGGED, false)
+                .setValue(LEFT, false)
+                .setValue(RIGHT, false)
+                .setValue(UP, false)
+                .setValue(DOWN, false));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder.add(WATERLOGGED, LEFT, RIGHT, UP, DOWN));
+    }
+
+    @Override
+    public FluidState getFluidState(BlockState state) {
+        return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : super.getFluidState(state);
+    }
+
+    @Override
+    public BlockState updateShape(
+            BlockState state,
+            Direction direction,
+            BlockState neighbor,
+            LevelAccessor level,
+            BlockPos pos,
+            BlockPos neighborPos) {
         if (state.getValue(WATERLOGGED)) level.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(level));
         return connect(super.updateShape(state, direction, neighbor, level, pos, neighborPos), level, pos);
     }
-    public static BlockState connect(BlockState state, java.util.function.Predicate<Direction> continues) {
+
+    public static BlockState connect(BlockState state, Predicate<Direction> continues) {
         Direction facing = state.getValue(HORIZONTAL_FACING);
-        return state.setValue(LEFT, continues.test(facing.getClockWise())).setValue(RIGHT, continues.test(facing.getCounterClockWise()))
-            .setValue(UP, continues.test(Direction.UP)).setValue(DOWN, continues.test(Direction.DOWN));
+        return state.setValue(LEFT, continues.test(facing.getClockWise()))
+                .setValue(RIGHT, continues.test(facing.getCounterClockWise()))
+                .setValue(UP, continues.test(Direction.UP))
+                .setValue(DOWN, continues.test(Direction.DOWN));
     }
+
     static BlockState connect(BlockState state, BlockGetter level, BlockPos pos) {
         return connect(state, d -> {
             BlockState neighbor = level.getBlockState(pos.relative(d));
-            return neighbor.getBlock() instanceof FlipDotBlock && neighbor.getValue(HORIZONTAL_FACING) == state.getValue(HORIZONTAL_FACING);
+            return neighbor.getBlock() instanceof FlipDotBlock
+                    && neighbor.getValue(HORIZONTAL_FACING) == state.getValue(HORIZONTAL_FACING);
         });
     }
-    // Placement helpers and wrenching can set the state without asking for its shape, so check the borders once it lands.
-    @Override public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean moving) {
+    // Placement helpers and wrenching can set the state without asking for its shape, so check the borders once it
+    // lands.
+    @Override
+    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean moving) {
         super.onPlace(state, level, pos, oldState, moving);
         BlockState connected = connect(state, level, pos);
         if (connected != state) level.setBlock(pos, connected, Block.UPDATE_ALL);
         // Schematicannons place tiles without updating neighbors, so tell the tiles around this one that it landed.
         else state.updateNeighbourShapes(level, pos, Block.UPDATE_ALL);
     }
-    @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(HORIZONTAL_FACING).getAxis(); }
+
+    @Override
+    public Direction.Axis getRotationAxis(BlockState state) {
+        return state.getValue(HORIZONTAL_FACING).getAxis();
+    }
     // Matches Create's Display Board.
-    @Override public SpeedLevel getMinimumRequiredSpeedLevel() { return SpeedLevel.MEDIUM; }
-    @Override public Class<FlipDotBlockEntity> getBlockEntityClass() { return FlipDotBlockEntity.class; }
-    @Override public BlockEntityType<? extends FlipDotBlockEntity> getBlockEntityType() { return ModContent.FLIP_DOT_ENTITY.get(); }
-    @Override public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+    @Override
+    public SpeedLevel getMinimumRequiredSpeedLevel() {
+        return SpeedLevel.MEDIUM;
+    }
+
+    @Override
+    public Class<FlipDotBlockEntity> getBlockEntityClass() {
+        return FlipDotBlockEntity.class;
+    }
+
+    @Override
+    public BlockEntityType<? extends FlipDotBlockEntity> getBlockEntityType() {
+        return ModBlockEntities.FLIP_DOT_DISPLAY.get();
+    }
+
+    @Override
+    public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
         return getRotationAxis(state) == Direction.Axis.Z ? box(0, 0, 3, 16, 16, 13) : box(3, 0, 0, 13, 16, 16);
     }
     /**
@@ -82,12 +159,15 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
      */
     private static boolean protectedFrom(Player player, Level level, FlipDotAssembly group) {
         if (level.isClientSide || group == null) return false;
-        var chunks = new java.util.HashSet<Long>();
+        var chunks = new HashSet<Long>();
         for (var tile : group.tiles()) {
             BlockPos pos = tile.getBlockPos();
-            if (!chunks.add(net.minecraft.world.level.ChunkPos.asLong(pos))) continue;
-            if (net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(new net.neoforged.neoforge.event.level.BlockEvent.BreakEvent(level, pos, tile.getBlockState(), player)).isCanceled()) {
-                player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.create_display_works.board_protected"), true);
+            if (!chunks.add(ChunkPos.asLong(pos))) continue;
+            if (NeoForge.EVENT_BUS
+                    .post(new BlockEvent.BreakEvent(level, pos, tile.getBlockState(), player))
+                    .isCanceled()) {
+                player.displayClientMessage(
+                        Component.translatable("message.create_display_works.board_protected"), true);
                 return true;
             }
         }
@@ -98,29 +178,60 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
         Player player = context.getPlayer();
         if (player == null) return false;
         Direction facing = state.getValue(HORIZONTAL_FACING);
-        for (Direction side : new Direction[]{facing.getClockWise(), facing.getCounterClockWise(), Direction.UP, Direction.DOWN}) {
+        for (Direction side :
+                new Direction[] {facing.getClockWise(), facing.getCounterClockWise(), Direction.UP, Direction.DOWN}) {
             BlockPos neighbor = context.getClickedPos().relative(side);
             BlockState other = context.getLevel().getBlockState(neighbor);
-            if (other.getBlock() instanceof FlipDotBlock && other.getValue(HORIZONTAL_FACING) == facing
-                && protectedFrom(player, context.getLevel(), FlipDotAssembly.find(context.getLevel(), neighbor))) return true;
+            if (other.getBlock() instanceof FlipDotBlock
+                    && other.getValue(HORIZONTAL_FACING) == facing
+                    && protectedFrom(player, context.getLevel(), FlipDotAssembly.find(context.getLevel(), neighbor)))
+                return true;
         }
         return false;
     }
-    @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
-        BlockState behind = context.getLevel().getBlockState(context.getClickedPos().relative(context.getClickedFace().getOpposite()));
-        BlockState state = behind.is(this) && (context.getPlayer() == null || !context.getPlayer().isShiftKeyDown())
-            ? defaultBlockState().setValue(HORIZONTAL_FACING, behind.getValue(HORIZONTAL_FACING)) : super.getStateForPlacement(context);
+
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        BlockState behind = context.getLevel()
+                .getBlockState(context.getClickedPos()
+                        .relative(context.getClickedFace().getOpposite()));
+        BlockState state = behind.is(this)
+                        && (context.getPlayer() == null || !context.getPlayer().isShiftKeyDown())
+                ? defaultBlockState().setValue(HORIZONTAL_FACING, behind.getValue(HORIZONTAL_FACING))
+                : super.getStateForPlacement(context);
         if (joinsProtectedBoard(context, state)) return null;
-        return connect(state.setValue(WATERLOGGED, context.getLevel().getFluidState(context.getClickedPos()).getType() == Fluids.WATER),
-            context.getLevel(), context.getClickedPos());
+        return connect(
+                state.setValue(
+                        WATERLOGGED,
+                        context.getLevel()
+                                        .getFluidState(context.getClickedPos())
+                                        .getType()
+                                == Fluids.WATER),
+                context.getLevel(),
+                context.getClickedPos());
     }
-    @Override protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
-            Player player, InteractionHand hand, BlockHitResult hit) {
-        if (player.isShiftKeyDown() || !player.mayBuild()) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+
+    @Override
+    protected ItemInteractionResult useItemOn(
+            ItemStack stack,
+            BlockState state,
+            Level level,
+            BlockPos pos,
+            Player player,
+            InteractionHand hand,
+            BlockHitResult hit) {
+        if (player.isShiftKeyDown() || !player.mayBuild())
+            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
         var helper = PlacementHelpers.get(PLACEMENT);
-        boolean edits = helper.matchesItem(stack) || DyeColor.getColor(stack) != null || stack.is(Items.NAME_TAG) && stack.has(DataComponents.CUSTOM_NAME) || AllBlocks.CLIPBOARD.isIn(stack);
-        if (edits && protectedFrom(player, level, FlipDotAssembly.find(level, pos))) return ItemInteractionResult.SUCCESS;
-        if (helper.matchesItem(stack)) return helper.getOffset(player, level, state, pos, hit).placeInWorld(level, (BlockItem)stack.getItem(), player, hand, hit);
+        boolean edits = helper.matchesItem(stack)
+                || DyeColor.getColor(stack) != null
+                || stack.is(Items.NAME_TAG) && stack.has(DataComponents.CUSTOM_NAME)
+                || AllBlocks.CLIPBOARD.isIn(stack);
+        if (edits && protectedFrom(player, level, FlipDotAssembly.find(level, pos)))
+            return ItemInteractionResult.SUCCESS;
+        if (helper.matchesItem(stack))
+            return helper.getOffset(player, level, state, pos, hit)
+                    .placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hit);
         FlipDotBlockEntity be = getBlockEntity(level, pos);
         if (be == null) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
         DyeColor dye = DyeColor.getColor(stack);
@@ -132,19 +243,23 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
             return ItemInteractionResult.SUCCESS;
         }
         if (stack.is(Items.NAME_TAG) && stack.has(DataComponents.CUSTOM_NAME)) {
-            if (!level.isClientSide) be.setTextAtBlock(stack.get(DataComponents.CUSTOM_NAME).getString());
+            if (!level.isClientSide)
+                be.setTextAtBlock(stack.get(DataComponents.CUSTOM_NAME).getString());
             return ItemInteractionResult.SUCCESS;
         }
         if (AllBlocks.CLIPBOARD.isIn(stack)) {
             if (!level.isClientSide) {
                 var group = be.assembly();
                 if (group != null) {
-                    var lines = new java.util.ArrayList<String>();
+                    var lines = new ArrayList<String>();
                     for (var entry : ClipboardEntry.getLastViewedEntries(stack))
-                        java.util.Collections.addAll(lines, entry.text.getString().split("\\n", -1));
+                        Collections.addAll(lines, entry.text.getString().split("\\n", -1));
                     if (!lines.isEmpty() && lines.getFirst().equals("[pixels]")) {
-                        long[] pixels = PixelPattern.parse(lines.subList(1, lines.size()), group.width(), group.height());
-                        if (pixels == null) player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.create_display_works.invalid_pixels"), true);
+                        long[] pixels =
+                                PixelPattern.parse(lines.subList(1, lines.size()), group.width(), group.height());
+                        if (pixels == null)
+                            player.displayClientMessage(
+                                    Component.translatable("message.create_display_works.invalid_pixels"), true);
                         else be.submitFrame(pixels, group.width(), group.height());
                         return ItemInteractionResult.SUCCESS;
                     }
@@ -156,16 +271,19 @@ public class FlipDotBlock extends HorizontalKineticBlock implements IBE<FlipDotB
         }
         return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
     }
-    @Override protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
-        if (!player.mayBuild() || player.isShiftKeyDown() || !player.getMainHandItem().isEmpty()) return InteractionResult.PASS;
-        if (!level.isClientSide && player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) withBlockEntityDo(level, pos, be -> {
-            var group=be.assembly();
-            if(protectedFrom(player,level,group))return;
-            if(group!=null && group.width()*group.height()>com.zmm2025.createdisplayworks.media.MediaClip.MAX_TILES){
-                player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.create_display_works.media_canvas_limit"),true);return;
-            }
-            if(group!=null) com.zmm2025.createdisplayworks.media.MediaNetwork.open(serverPlayer,pos,group);
-        });
+
+    @Override
+    protected InteractionResult useWithoutItem(
+            BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (!player.mayBuild()
+                || player.isShiftKeyDown()
+                || !player.getMainHandItem().isEmpty()) return InteractionResult.PASS;
+        if (!level.isClientSide && player instanceof ServerPlayer serverPlayer)
+            withBlockEntityDo(level, pos, be -> {
+                var group = be.assembly();
+                if (group != null && !protectedFrom(player, level, group))
+                    MediaNetwork.open(serverPlayer, pos, be.mediaCanvas(group));
+            });
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
 }
