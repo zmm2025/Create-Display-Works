@@ -23,6 +23,7 @@ How to build the mod, test it in the dev client, and add new content. Coding age
 | `./gradlew devStart -PthreadId=<id>` | Starts this checkout's game with its window hidden, in a T3 Code thread's terminal. Agents use this. `devRestart` stops it first. |
 | `./gradlew devServerStart -PthreadId=<id>` | Starts a test dedicated server for this checkout. `devServerStop` closes it. |
 | `./gradlew prEvidence` | Uploads `build/pr-evidence/` as the branch's PR evidence (see [CONTRIBUTING.md](CONTRIBUTING.md#pr-evidence)). |
+| `./gradlew pruneBranches` | Deletes local branches already merged into `main` (see [Merged branches](#merged-branches)). `-PdryRun` only lists them. |
 
 Before opening a PR, `./gradlew build` and `./gradlew runGameTestServer` should pass, and `./gradlew runData`
 should leave `src/generated` unchanged. CI checks all three.
@@ -36,15 +37,31 @@ each developer adds them once; they only call the Gradle tasks above.
 | --- | --- | --- | --- |
 | Launch Minecraft | `./gradlew runDevClient; if ($LASTEXITCODE -eq 0) { exit }` | play | |
 | Reload Minecraft | `./gradlew devReload` | build | |
-| Stop Minecraft | `./gradlew devStop` | debug | **Run in the thread's worktree when the thread settles** |
+| Stop Minecraft | `./gradlew devStop pruneBranches --continue` | debug | **Run in the thread's worktree when the thread settles** |
 
 On macOS and Linux, use `./gradlew runDevClient && exit` for **Launch Minecraft**. The `exit` closes the game's
 terminal when the game exits normally, because an open terminal keeps T3 Code from cleaning up a worktree. If the
 build fails or the game crashes, the terminal stays open so you can read the error. When a worktree's thread settles,
-**Stop Minecraft** closes that worktree's game; T3 Code skips settle scripts on the main checkout.
+**Stop Minecraft** closes that worktree's game; T3 Code skips settle scripts on the main checkout. T3 Code runs only
+the first script marked to run on settle, so **Stop Minecraft** also runs `pruneBranches`.
 
 Agents run `devReload` at the end of each turn that changes `src/`, so **Reload Minecraft** is a manual fallback. It
 replaces both F3+T and `/reload`.
+
+### Merged branches
+
+GitHub deletes a PR's branch when it merges, and T3 Code removes a settled thread's worktree, but nothing deletes the
+local branch. `./gradlew pruneBranches` does, and **Stop Minecraft** runs it whenever a thread settles. A thread's own
+branch is still checked out at that moment, so it goes at the next settle.
+
+It deletes a branch only when nothing on it can be lost: no worktree has it checked out, and its last commit is
+already in `main` or is the head of a merged PR (found with the `gh` CLI, since squash merges leave the branch's
+commits outside `main`). It also fast-forwards the local `main` when no checkout has it open. Everything else stays,
+and the task lists merged branches that are still checked out. `-PdryRun` lists what it would delete without
+deleting anything.
+
+T3 Code only removes a worktree that's still on the branch it created, so agents never rename or switch branches (see
+[AGENTS.md](AGENTS.md#branches)). A worktree with uncommitted changes or an open terminal stays too.
 
 ## Project layout
 
@@ -57,7 +74,7 @@ replaces both F3+T and `/reload`.
 | `src/test` | Unit tests (`./gradlew test`). |
 | `src/dev` | Dev-only code that never ships: the control API, fixtures, GameTests and dev commands. |
 | `src/devAgent` | The Java agent that hot-swaps classes. |
-| `gradle/` | The dev client and PR evidence tasks, and the named sets of test mods. |
+| `gradle/` | The dev client, PR evidence and branch cleanup tasks, and the named sets of test mods. |
 
 ## Adding a block
 
