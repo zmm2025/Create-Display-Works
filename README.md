@@ -12,7 +12,7 @@ All items are subject to change or removal without notice.
 - Split-flap displays
 - Segment displays
 - Indicator lights
-- Analog and bar guages
+- Analog and bar gauges
 - Mechanical tickers/counters
 - Chart recorders
 - RGB pixel matrices
@@ -29,25 +29,16 @@ All items are subject to change or removal without notice.
 - Multi-source display targets
 
 ### Render Distance 🔭
-A new kind of feature for this mod: changing how existing Create and Minecraft blocks draw, rather than adding new ones. The goal is for display blocks to stay visible out to the player's render distance, as flip-dot displays already do when Flywheel is available.
+A new kind of feature for this mod: changing how existing Create and Minecraft blocks draw, rather than adding new ones. The goal is for display blocks to stay visible out to the player's render distance, as flip-dot displays already do.
 
 - Create display boards (currently 64 blocks)
 - Create nixie tubes (currently 128 blocks)
 - Other Create blocks that show information (still to be surveyed)
 - Relevant Minecraft blocks, such as signs (still to be surveyed)
-- The flip-dot fallback renderer used when Flywheel isn't available (currently 64 blocks)
-
-Notes for when this is built:
-- Measure first: use `/perf` on a wall of display boards, near and far, then decide whether this needs a client setting.
-- Registering a renderer subclass that overrides `getViewDistance` looks possible without a mixin, but this is unconfirmed.
-- The real limit becomes the client's render distance, because block entities further away aren't loaded. Distant Horizons won't show them.
-- Create's flap animation runs in the client block entity tick, not while drawing, so off-screen boards don't fall behind.
 
 ### Integrations & Compatibility 🔀
 - [Create Aeronautics](https://modrinth.com/mod/create-aeronautics) compatibility
 - [Horizon](https://playhorizon.dev) support
 
-## 🧑‍💻 Development
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the hot-reloading dev client, the shared test world and the agent control API.
-
-To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md), which also covers the screenshots and recordings PRs need.
+## 🧑‍💻 Contributing
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [DEVELOPMENT.md](DEVELOPMENT.md).

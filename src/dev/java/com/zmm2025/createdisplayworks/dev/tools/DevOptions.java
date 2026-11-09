@@ -1,15 +1,14 @@
 package com.zmm2025.createdisplayworks.dev.tools;
 
 import com.google.gson.JsonObject;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.Options;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.Options;
 
 /**
  * Reads and changes game settings by the names {@code options.txt} uses, so every setting works, including key bindings
@@ -30,23 +29,29 @@ final class DevOptions {
                 Path file = minecraft.options.getFile().toPath(), backup = file.resolveSibling(BACKUP);
                 minecraft.options.save();
                 Map<String, String> before = read(file);
-                if(Boolean.parseBoolean(query.get("restore"))) {
-                    if(!Files.exists(backup)) return DevTools.failure("There's nothing to restore: no setting has changed since the last restore.");
+                if (Boolean.parseBoolean(query.get("restore"))) {
+                    if (!Files.exists(backup))
+                        return DevApi.failure(
+                                "There's nothing to restore: no setting has changed since the last restore.");
                     Files.move(backup, file, StandardCopyOption.REPLACE_EXISTING);
                     return apply(minecraft, before, read(file));
                 }
                 Map<String, String> wanted = new LinkedHashMap<>(query);
                 wanted.keySet().removeAll(RESERVED);
-                if(wanted.isEmpty()) return list(before, query.get("filter"));
-                List<String> unknown = wanted.keySet().stream().filter(name -> !before.containsKey(name)).toList();
-                if(!unknown.isEmpty()) return DevTools.failure("Unknown settings: " + String.join(", ", unknown) + ". GET /options lists them.");
-                if(!Files.exists(backup)) Files.copy(file, backup);
+                if (wanted.isEmpty()) return list(before, query.get("filter"));
+                List<String> unknown = wanted.keySet().stream()
+                        .filter(name -> !before.containsKey(name))
+                        .toList();
+                if (!unknown.isEmpty())
+                    return DevApi.failure(
+                            "Unknown settings: " + String.join(", ", unknown) + ". GET /options lists them.");
+                if (!Files.exists(backup)) Files.copy(file, backup);
                 Map<String, String> after = new LinkedHashMap<>(before);
                 after.putAll(wanted);
                 write(file, after);
                 return apply(minecraft, before, after);
-            } catch(IOException e) {
-                return DevTools.failure(e.toString());
+            } catch (IOException e) {
+                return DevApi.failure(e.toString());
             }
         });
     }
@@ -57,18 +62,20 @@ final class DevOptions {
         options.load();
         options.save();
         Set<String> changed = new TreeSet<>();
-        after.forEach((name, value) -> { if(!value.equals(before.get(name))) changed.add(name); });
+        after.forEach((name, value) -> {
+            if (!value.equals(before.get(name))) changed.add(name);
+        });
         // The video settings button does this, not the option; Fabulous crashes on the next frame without it.
-        if(changed.contains("graphicsMode")) minecraft.levelRenderer.allChanged();
-        if(changed.contains("lang")) minecraft.getLanguageManager().setSelected(options.languageCode);
-        if(changed.contains("mipmapLevels")) {
+        if (changed.contains("graphicsMode")) minecraft.levelRenderer.allChanged();
+        if (changed.contains("lang")) minecraft.getLanguageManager().setSelected(options.languageCode);
+        if (changed.contains("mipmapLevels")) {
             minecraft.updateMaxMipLevel(options.mipmapLevels().get());
             minecraft.delayTextureReload();
         }
         boolean packs = changed.contains("resourcePacks") || changed.contains("incompatibleResourcePacks");
-        if(packs) options.loadSelectedResourcePacks(minecraft.getResourcePackRepository());
-        if(packs || changed.contains("lang")) minecraft.reloadResourcePacks();
-        JsonObject response = DevTools.ok(), changes = new JsonObject();
+        if (packs) options.loadSelectedResourcePacks(minecraft.getResourcePackRepository());
+        if (packs || changed.contains("lang")) minecraft.reloadResourcePacks();
+        JsonObject response = DevApi.ok(), changes = new JsonObject();
         changed.forEach(name -> {
             JsonObject change = new JsonObject();
             change.addProperty("before", before.get(name));
@@ -80,18 +87,20 @@ final class DevOptions {
     }
 
     private static JsonObject list(Map<String, String> options, String filter) {
-        JsonObject response = DevTools.ok(), values = new JsonObject();
+        JsonObject response = DevApi.ok(), values = new JsonObject();
         String wanted = filter == null ? "" : filter.toLowerCase(Locale.ROOT);
-        options.forEach((name, value) -> { if(name.toLowerCase(Locale.ROOT).contains(wanted)) values.addProperty(name, value); });
+        options.forEach((name, value) -> {
+            if (name.toLowerCase(Locale.ROOT).contains(wanted)) values.addProperty(name, value);
+        });
         response.add("options", values);
         return response;
     }
 
     private static Map<String, String> read(Path file) throws IOException {
         Map<String, String> options = new LinkedHashMap<>();
-        for(String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+        for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
             int split = line.indexOf(':');
-            if(split > 0) options.put(line.substring(0, split), line.substring(split + 1));
+            if (split > 0) options.put(line.substring(0, split), line.substring(split + 1));
         }
         return options;
     }

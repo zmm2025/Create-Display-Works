@@ -1,6 +1,10 @@
 name: Build
 
-on: [push, pull_request]
+# Pushes to a pull request's branch build once, as the pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   build:
@@ -27,6 +31,22 @@ jobs:
         env:
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew build
+
+      # Regenerates src/generated/resources and fails if that changes it, so generated files never drift from the
+      # registrations, src/main/lang and the Ponder scenes they come from.
+      - name: Check generated resources
+        run: |
+          ./gradlew runData
+          if [ -n "$(git status --porcelain src/generated)" ]; then
+            git status --porcelain src/generated
+            git diff src/generated
+            echo "::error::src/generated/resources is out of date. Run ./gradlew runData and commit the result."
+            exit 1
+          fi
+
+      # A headless dedicated server that runs the GameTests in src/dev and exits non-zero if any fail.
+      - name: Run GameTests
+        run: ./gradlew runGameTestServer
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7

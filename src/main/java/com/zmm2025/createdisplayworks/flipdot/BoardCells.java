@@ -12,15 +12,29 @@ public final class BoardCells {
     public static final int NONE = Integer.MIN_VALUE;
     /** The controller's own cell. */
     public static final int ORIGIN = 0;
+
     private BoardCells() {}
-    public static int pack(int column, int row) { return column << 16 | row & 0xFFFF; }
-    public static int column(int cell) { return cell >> 16; }
-    public static int row(int cell) { return (short)cell; }
+
+    public static int pack(int column, int row) {
+        return column << 16 | row & 0xFFFF;
+    }
+
+    public static int column(int cell) {
+        return cell >> 16;
+    }
+
+    public static int row(int cell) {
+        return (short) cell;
+    }
     /** The cell of the controller as seen from a tile at {@code cell}. */
-    public static int inverse(int cell) { return pack(-column(cell), -row(cell)); }
+    public static int inverse(int cell) {
+        return pack(-column(cell), -row(cell));
+    }
     /** Whether a cell is within the largest board, so damaged or unrelated data isn't trusted. */
     public static boolean valid(int cell) {
-        return cell != NONE && Math.abs(column(cell)) < FlipDotAssembly.MAX_SPAN && Math.abs(row(cell)) < FlipDotAssembly.MAX_SPAN;
+        return cell != NONE
+                && Math.abs(column(cell)) < FlipDotAssembly.MAX_SPAN
+                && Math.abs(row(cell)) < FlipDotAssembly.MAX_SPAN;
     }
     /**
      * Whether the tiles of one earlier board now sit in different cells, because the whole board was turned or flipped.
@@ -32,7 +46,8 @@ public final class BoardCells {
         if (previous.length != current.length || previous.length != previousShape.length) return false;
         if (Arrays.equals(previous, current)) return false;
         int[] before = previous.clone(), shape = previousShape.clone();
-        Arrays.sort(before); Arrays.sort(shape);
+        Arrays.sort(before);
+        Arrays.sort(shape);
         if (!Arrays.equals(before, shape)) return false;
         for (int i = 1; i < before.length; i++) if (before[i] == before[i - 1]) return false;
         return true;

@@ -5,7 +5,9 @@ import java.io.IOException;
 /** An import failure with a known cause, so the screen can explain it without parsing the message. */
 public final class MediaImportException extends IOException {
     public enum Reason {
-        NOT_FOUND, TOO_LARGE, TIMED_OUT,
+        NOT_FOUND,
+        TOO_LARGE,
+        TIMED_OUT,
         /** The media link or YouTube couldn't be reached. */
         NETWORK,
         /** A one-time helper download failed; {@link #detail()} names the host it comes from. */
@@ -21,11 +23,25 @@ public final class MediaImportException extends IOException {
         /** The helper and scratch folder can't be written; {@link #detail()} is its path. */
         CACHE
     }
+
     private final Reason reason;
     private final String detail;
-    public MediaImportException(Reason reason,String message){this(reason,message,"",null);}
-    public MediaImportException(Reason reason,String message,String detail,Throwable cause){super(message,cause);this.reason=reason;this.detail=detail==null?"":detail;}
-    public Reason reason(){return reason;}
+
+    public MediaImportException(Reason reason, String message) {
+        this(reason, message, "", null);
+    }
+
+    public MediaImportException(Reason reason, String message, String detail, Throwable cause) {
+        super(message, cause);
+        this.reason = reason;
+        this.detail = detail == null ? "" : detail;
+    }
+
+    public Reason reason() {
+        return reason;
+    }
     /** A host, platform or path the player-facing message shows; empty when it has none. */
-    public String detail(){return detail;}
+    public String detail() {
+        return detail;
+    }
 }

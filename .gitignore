@@ -17,6 +17,9 @@ out
 build
 .gradle
 
+# datagen
+src/generated/resources/.cache/
+
 # other
 eclipse
 run

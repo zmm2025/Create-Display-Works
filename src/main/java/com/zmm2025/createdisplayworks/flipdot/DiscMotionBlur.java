@@ -1,6 +1,7 @@
 package com.zmm2025.createdisplayworks.flipdot;
 
 import com.mojang.blaze3d.vertex.*;
+import com.zmm2025.createdisplayworks.ClientConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
 
@@ -16,16 +17,20 @@ final class DiscMotionBlur {
     static final int GHOSTS = 4;
     private static final int PEAK_ALPHA = 110;
     private static final double MAX_DISTANCE = 24;
+
     private DiscMotionBlur() {}
     /** True when the board is close enough, or in a Ponder scene, and has discs that moved within the shutter time. */
     static boolean active(FlipDotBlockEntity be, float partial) {
-        if (!com.zmm2025.createdisplayworks.ClientConfig.MOTION_BLUR.get() || be.discsSettled(partial - SHUTTER_TICKS)) return false;
+        if (!ClientConfig.MOTION_BLUR.get() || be.discsSettled(partial - SHUTTER_TICKS)) return false;
         // Ponder scenes are viewed up close, and their positions aren't in the world the camera is in.
         if (be.isVirtual()) return true;
         var camera = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
         return camera.distanceToSqr(Vec3.atCenterOf(be.getBlockPos())) <= MAX_DISTANCE * MAX_DISTANCE;
     }
-    interface Ghost { void accept(int index, float angle, int alpha); }
+
+    interface Ghost {
+        void accept(int index, float angle, int alpha);
+    }
     /** Lists the copies to draw: up to {@link #GHOSTS} per moving disc, each with the disc index, angle and alpha. */
     static void ghosts(FlipDotBlockEntity be, float partial, Ghost out) {
         for (int index = 0; index < 64; index++) {
@@ -38,7 +43,19 @@ final class DiscMotionBlur {
             }
         }
     }
-    static void render(FlipDotRenderer renderer, FlipDotBlockEntity be, float partial, PoseStack pose, VertexConsumer vertices, int light, int overlay) {
-        ghosts(be, partial, (index, angle, alpha) -> renderer.disc(be, pose, vertices, index / 8, index % 8, angle, alpha, 2, -1, light, overlay));
+
+    static void render(
+            FlipDotRenderer renderer,
+            FlipDotBlockEntity be,
+            float partial,
+            PoseStack pose,
+            VertexConsumer vertices,
+            int light,
+            int overlay) {
+        ghosts(
+                be,
+                partial,
+                (index, angle, alpha) ->
+                        renderer.disc(be, pose, vertices, index / 8, index % 8, angle, alpha, 2, -1, light, overlay));
     }
 }
