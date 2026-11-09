@@ -28,6 +28,7 @@ import java.util.function.Consumer;
 import net.createmod.catnip.math.AngleHelper;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
+import net.minecraft.core.SectionPos;
 import org.joml.Matrix4f;
 
 /**
@@ -74,6 +75,8 @@ public class FlipDotVisual extends KineticBlockEntityVisual<FlipDotBlockEntity> 
     private long palette;
     private int shownVersion;
     private boolean shownSettled;
+    /** Set while the board's section has no light yet, so the board is relit once it does. See {@link #lightReady}. */
+    private boolean lightPending;
 
     public FlipDotVisual(VisualizationContext context, FlipDotBlockEntity be, float partial) {
         super(context, be, partial);
@@ -120,6 +123,7 @@ public class FlipDotVisual extends KineticBlockEntityVisual<FlipDotBlockEntity> 
 
     @Override
     public void beginFrame(DynamicVisual.Context context) {
+        if (lightPending && lightReady()) updateLight(context.partialTick());
         if (shownSettled && shownVersion == blockEntity.motionVersion() || !isVisible(context.frustum())) return;
         float partial = context.partialTick();
         blockEntity.startClientMotion(partial);
@@ -179,8 +183,17 @@ public class FlipDotVisual extends KineticBlockEntityVisual<FlipDotBlockEntity> 
         // The renderer's entity shader reads lightmap texels exactly, but Flywheel filters between them, so aim at
         // texel centres.
         light = computePackedLight() + (8 << 16 | 8);
+        lightPending = !lightReady();
         for (var disc : discs) disc.light(light).setChanged();
         for (var ghost : ghosts) ghost.light(light).setChanged();
+    }
+
+    /**
+     * A chunk's light reaches the client a few frames after its blocks, and Flywheel doesn't relight visuals when it
+     * does, so a board placed in a newly loaded chunk would keep the zero light it read first and draw black.
+     */
+    private boolean lightReady() {
+        return level.getLightEngine().lightOnInSection(SectionPos.of(pos));
     }
 
     @Override
