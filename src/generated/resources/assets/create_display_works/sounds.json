@@ -1,0 +1,8 @@
+{
+  "disc_rattle": {
+    "sounds": [
+      "create_display_works:disc_rattle"
+    ],
+    "subtitle": "subtitles.create_display_works.disc_rattle"
+  }
+}

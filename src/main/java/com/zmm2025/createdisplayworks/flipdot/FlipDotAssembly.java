@@ -5,44 +5,79 @@ import net.minecraft.core.*;
 import net.minecraft.world.level.LevelAccessor;
 
 /** A bounded, loaded, coplanar connected component. Missing cells remain empty. */
-public record FlipDotAssembly(List<FlipDotBlockEntity> tiles, FlipDotBlockEntity controller, Direction right,
-        int left, int top, int width, int height) {
+public record FlipDotAssembly(
+        List<FlipDotBlockEntity> tiles,
+        FlipDotBlockEntity controller,
+        Direction right,
+        int left,
+        int top,
+        int width,
+        int height) {
     public static final int MAX_TILES = 256;
     public static final int MAX_SPAN = 32;
     /** The direction columns run in, left to right as seen from the front of a board facing {@code facing}. */
-    public static Direction right(Direction facing) { return facing.getCounterClockWise(); }
+    public static Direction right(Direction facing) {
+        return facing.getCounterClockWise();
+    }
+
     public static FlipDotAssembly find(LevelAccessor level, BlockPos start) {
         if (!(level.getBlockEntity(start) instanceof FlipDotBlockEntity first)) return null;
         Direction facing = first.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING);
         Direction right = right(facing);
         List<FlipDotBlockEntity> tiles = new ArrayList<>();
-        Set<BlockPos> seen = new HashSet<>(); ArrayDeque<BlockPos> queue = new ArrayDeque<>(); queue.add(start);
+        Set<BlockPos> seen = new HashSet<>();
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+        queue.add(start);
         while (!queue.isEmpty()) {
             BlockPos pos = queue.removeFirst();
             if (!seen.add(pos) || !level.hasChunkAt(pos)) continue;
-            if (!(level.getBlockEntity(pos) instanceof FlipDotBlockEntity be) || be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING) != facing) continue;
+            if (!(level.getBlockEntity(pos) instanceof FlipDotBlockEntity be)
+                    || be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING) != facing) continue;
             tiles.add(be);
             // Oversized arrays do not partially update or elect conflicting controllers.
             if (tiles.size() > MAX_TILES) return null;
-            for (Direction d : new Direction[]{right, right.getOpposite(), Direction.UP, Direction.DOWN}) queue.add(pos.relative(d));
+            for (Direction d : new Direction[] {right, right.getOpposite(), Direction.UP, Direction.DOWN})
+                queue.add(pos.relative(d));
         }
-        int left = tiles.stream().mapToInt(be -> coordinate(be.getBlockPos(), right)).min().orElse(0);
-        int max = tiles.stream().mapToInt(be -> coordinate(be.getBlockPos(), right)).max().orElse(0);
+        int left = tiles.stream()
+                .mapToInt(be -> coordinate(be.getBlockPos(), right))
+                .min()
+                .orElse(0);
+        int max = tiles.stream()
+                .mapToInt(be -> coordinate(be.getBlockPos(), right))
+                .max()
+                .orElse(0);
         int top = tiles.stream().mapToInt(be -> be.getBlockPos().getY()).max().orElse(0);
-        int bottom = tiles.stream().mapToInt(be -> be.getBlockPos().getY()).min().orElse(0);
+        int bottom =
+                tiles.stream().mapToInt(be -> be.getBlockPos().getY()).min().orElse(0);
         if (max - left >= MAX_SPAN || top - bottom >= MAX_SPAN) return null;
-        FlipDotBlockEntity controller = tiles.stream().min(Comparator.<FlipDotBlockEntity>comparingInt(be -> -be.getBlockPos().getY())
-            .thenComparingInt(be -> coordinate(be.getBlockPos(), right))).orElseThrow();
+        FlipDotBlockEntity controller = tiles.stream()
+                .min(Comparator.<FlipDotBlockEntity>comparingInt(
+                                be -> -be.getBlockPos().getY())
+                        .thenComparingInt(be -> coordinate(be.getBlockPos(), right)))
+                .orElseThrow();
         return new FlipDotAssembly(List.copyOf(tiles), controller, right, left, top, max - left + 1, top - bottom + 1);
     }
-    private static int coordinate(BlockPos pos, Direction direction) { return pos.getX() * direction.getStepX() + pos.getZ() * direction.getStepZ(); }
-    public int column(BlockPos pos) { return coordinate(pos, right) - left; }
-    public int row(BlockPos pos) { return top - pos.getY(); }
+
+    private static int coordinate(BlockPos pos, Direction direction) {
+        return pos.getX() * direction.getStepX() + pos.getZ() * direction.getStepZ();
+    }
+
+    public int column(BlockPos pos) {
+        return coordinate(pos, right) - left;
+    }
+
+    public int row(BlockPos pos) {
+        return top - pos.getY();
+    }
     /** The tile's {@link BoardCells cell} relative to the controller. */
-    public int cell(BlockPos pos) { return cell(pos, controller.getBlockPos(), right); }
+    public int cell(BlockPos pos) {
+        return cell(pos, controller.getBlockPos(), right);
+    }
     /** The {@link BoardCells cell} of {@code pos} on a board whose controller is at {@code controller}, or {@link BoardCells#NONE} if it's out of reach. */
     public static int cell(BlockPos pos, BlockPos controller, Direction right) {
-        int cell = BoardCells.pack(coordinate(pos, right) - coordinate(controller, right), controller.getY() - pos.getY());
+        int cell =
+                BoardCells.pack(coordinate(pos, right) - coordinate(controller, right), controller.getY() - pos.getY());
         return BoardCells.valid(cell) ? cell : BoardCells.NONE;
     }
     /** The position {@code cell} away from {@code from}, on a board whose columns run toward {@code right}. */

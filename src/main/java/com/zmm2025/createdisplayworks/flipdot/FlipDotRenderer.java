@@ -17,62 +17,138 @@ import org.joml.Quaternionf;
  * Flywheel support, and in Ponder scenes. Otherwise {@link FlipDotVisual} draws them and this renderer doesn't run.
  */
 public class FlipDotRenderer extends KineticBlockEntityRenderer<FlipDotBlockEntity> {
-    static final ResourceLocation WHITE = ResourceLocation.fromNamespaceAndPath("create_display_works", "textures/block/disc.png");
+    static final ResourceLocation WHITE =
+            ResourceLocation.fromNamespaceAndPath("create_display_works", "textures/block/disc.png");
     static final float[][][] PLATES = {
-        geometry(-.5625f,.5625f,-.8125f,-.5625f), geometry(-.8125f,.8125f,-.5625f,.5625f), geometry(-.5625f,.5625f,.5625f,.8125f)
+        geometry(-.5625f, .5625f, -.8125f, -.5625f),
+        geometry(-.8125f, .8125f, -.5625f, .5625f),
+        geometry(-.5625f, .5625f, .5625f, .8125f)
     };
-    static final float[][] NORMALS = {{0,0,-1},{0,0,1},{-1,0,0},{1,0,0},{0,1,0},{0,-1,0}};
+    static final float[][] NORMALS = {{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, -1, 0}};
     static final int EDGE = 0x2F3130;
     /** Beyond this many blocks, disc edges are a small fraction of a pixel wide, so they're left out. */
     private static final double EDGE_DISTANCE = 16;
+
     private final Quaternionf rotation = new Quaternionf();
-    public FlipDotRenderer(BlockEntityRendererProvider.Context context) { super(context); }
+
+    public FlipDotRenderer(BlockEntityRendererProvider.Context context) {
+        super(context);
+    }
     /** Flywheel draws boards as far as chunks render, so this does too, instead of stopping at 64 blocks. */
-    @Override public int getViewDistance() { return Minecraft.getInstance().options.getEffectiveRenderDistance() * 16; }
-    @Override protected void renderSafe(FlipDotBlockEntity be, float partial, PoseStack pose, MultiBufferSource buffers, int light, int overlay) {
+    @Override
+    public int getViewDistance() {
+        return Minecraft.getInstance().options.getEffectiveRenderDistance() * 16;
+    }
+
+    @Override
+    protected void renderSafe(
+            FlipDotBlockEntity be, float partial, PoseStack pose, MultiBufferSource buffers, int light, int overlay) {
         be.startClientMotion(partial);
-        renderRotatingBuffer(be, CachedBuffers.partialFacingVertical(AllPartialModels.SHAFTLESS_COGWHEEL,
-            be.getBlockState(), be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING)), pose, buffers.getBuffer(RenderType.solid()), light);
+        renderRotatingBuffer(
+                be,
+                CachedBuffers.partialFacingVertical(
+                        AllPartialModels.SHAFTLESS_COGWHEEL,
+                        be.getBlockState(),
+                        be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING)),
+                pose,
+                buffers.getBuffer(RenderType.solid()),
+                light);
         pose.pushPose();
         pose.translate(.5, .5, .5);
-        pose.mulPose(Axis.YP.rotationDegrees(180 - be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING).toYRot()));
+        pose.mulPose(Axis.YP.rotationDegrees(180
+                - be.getBlockState().getValue(FlipDotBlock.HORIZONTAL_FACING).toYRot()));
         pose.translate(-.5, -.5, -.5);
         VertexConsumer vertices = buffers.getBuffer(RenderType.entityCutout(WHITE));
-        boolean edges = be.isVirtual() || Minecraft.getInstance().gameRenderer.getMainCamera().getPosition()
-            .distanceToSqr(Vec3.atCenterOf(be.getBlockPos())) < EDGE_DISTANCE * EDGE_DISTANCE;
-        for (int row = 0; row < 8; row++) for (int col = 0; col < 8; col++) {
-            float angle = be.angle(row * 8 + col, partial);
-            // A settled disc's inner face lies against the board, so nothing can see it.
-            int hidden = angle < .01f ? 1 : angle > 179.99f ? 0 : -1;
-            disc(be, pose, vertices, row, col, angle, 255, edges ? 6 : 2, hidden, light, overlay);
-        }
-        if (DiscMotionBlur.active(be, partial)) DiscMotionBlur.render(this, be, partial, pose, buffers.getBuffer(RenderType.entityTranslucent(WHITE)), light, overlay);
+        boolean edges = be.isVirtual()
+                || Minecraft.getInstance()
+                                .gameRenderer
+                                .getMainCamera()
+                                .getPosition()
+                                .distanceToSqr(Vec3.atCenterOf(be.getBlockPos()))
+                        < EDGE_DISTANCE * EDGE_DISTANCE;
+        for (int row = 0; row < 8; row++)
+            for (int col = 0; col < 8; col++) {
+                float angle = be.angle(row * 8 + col, partial);
+                // A settled disc's inner face lies against the board, so nothing can see it.
+                int hidden = angle < .01f ? 1 : angle > 179.99f ? 0 : -1;
+                disc(be, pose, vertices, row, col, angle, 255, edges ? 6 : 2, hidden, light, overlay);
+            }
+        if (DiscMotionBlur.active(be, partial))
+            DiscMotionBlur.render(
+                    this, be, partial, pose, buffers.getBuffer(RenderType.entityTranslucent(WHITE)), light, overlay);
         pose.popPose();
     }
     /**
      * Draws the first {@code faces} faces of each plate, except face {@code hidden} (-1 for none): front and back come
      * first, then the four thin edges.
      */
-    void disc(FlipDotBlockEntity be, PoseStack pose, VertexConsumer vertices, int row, int col, float angle, int alpha, int faces, int hidden, int light, int overlay) {
+    void disc(
+            FlipDotBlockEntity be,
+            PoseStack pose,
+            VertexConsumer vertices,
+            int row,
+            int col,
+            float angle,
+            int alpha,
+            int faces,
+            int hidden,
+            int light,
+            int overlay) {
         pose.pushPose();
         pose.translate((15 - col * 2) / 16f, (15 - row * 2) / 16f, 4.5f / 16);
-        pose.mulPose(rotation.rotationAxis((float)Math.toRadians(angle), .70710677f, .70710677f, 0));
-        for (float[][] plate : PLATES) for (int face = 0; face < faces; face++) {
-            if (face == hidden) continue;
-            float[] normal = NORMALS[face];
-            quad(pose,vertices,plate[face],normal[0],normal[1],normal[2],face==0?be.discColor():face==1?be.backColor():EDGE,alpha,light,overlay);
-        }
+        pose.mulPose(rotation.rotationAxis((float) Math.toRadians(angle), .70710677f, .70710677f, 0));
+        for (float[][] plate : PLATES)
+            for (int face = 0; face < faces; face++) {
+                if (face == hidden) continue;
+                float[] normal = NORMALS[face];
+                quad(
+                        pose,
+                        vertices,
+                        plate[face],
+                        normal[0],
+                        normal[1],
+                        normal[2],
+                        face == 0 ? be.discColor() : face == 1 ? be.backColor() : EDGE,
+                        alpha,
+                        light,
+                        overlay);
+            }
         pose.popPose();
     }
+
     private static float[][] geometry(float l, float r, float b, float t) {
-        l/=16; r/=16; b/=16; t/=16; float z=.0625f/16;
-        return new float[][]{{l,b,-z,l,t,-z,r,t,-z,r,b,-z},{r,b,z,r,t,z,l,t,z,l,b,z},
-            {l,b,z,l,t,z,l,t,-z,l,b,-z},{r,b,-z,r,t,-z,r,t,z,r,b,z},
-            {l,t,-z,l,t,z,r,t,z,r,t,-z},{l,b,z,l,b,-z,r,b,-z,r,b,z}};
+        l /= 16;
+        r /= 16;
+        b /= 16;
+        t /= 16;
+        float z = .0625f / 16;
+        return new float[][] {
+            {l, b, -z, l, t, -z, r, t, -z, r, b, -z},
+            {r, b, z, r, t, z, l, t, z, l, b, z},
+            {l, b, z, l, t, z, l, t, -z, l, b, -z},
+            {r, b, -z, r, t, -z, r, t, z, r, b, z},
+            {l, t, -z, l, t, z, r, t, z, r, t, -z},
+            {l, b, z, l, b, -z, r, b, -z, r, b, z}
+        };
     }
-    private static void quad(PoseStack pose, VertexConsumer out, float[] points, float nx, float ny, float nz, int color, int alpha, int light, int overlay) {
-        for(int i=0;i<4;i++) out.addVertex(pose.last(),points[i*3],points[i*3+1],points[i*3+2])
-            .setColor((color>>16)&255,(color>>8)&255,color&255,alpha).setUv(i<2?0:1,i==0||i==3?1:0)
-            .setOverlay(overlay).setLight(light).setNormal(pose.last(),nx,ny,nz);
+
+    private static void quad(
+            PoseStack pose,
+            VertexConsumer out,
+            float[] points,
+            float nx,
+            float ny,
+            float nz,
+            int color,
+            int alpha,
+            int light,
+            int overlay) {
+        for (int i = 0; i < 4; i++)
+            out.addVertex(pose.last(), points[i * 3], points[i * 3 + 1], points[i * 3 + 2])
+                    .setColor((color >> 16) & 255, (color >> 8) & 255, color & 255, alpha)
+                    .setUv(i < 2 ? 0 : 1, i == 0 || i == 3 ? 1 : 0)
+                    .setOverlay(overlay)
+                    .setLight(light)
+                    .setNormal(pose.last(), nx, ny, nz);
     }
 }
