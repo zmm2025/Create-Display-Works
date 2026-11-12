@@ -30,20 +30,27 @@ should leave `src/generated` unchanged. CI checks all three.
 
 ### T3 Code scripts
 
-In T3 Code, add these as project scripts (**Project settings → Scripts**). T3 keeps scripts in its own settings, so
-each developer adds them once; they only call the Gradle tasks above.
+[t3.json](t3.json) declares the project's T3 Code scripts. T3 Code doesn't add them on its own: on each machine,
+import them once from the scripts menu's **From t3.json** group, or **Settings → Projects → Actions → Import
+scripts**. They're then saved in that machine's T3 settings, so a later change to `t3.json` means editing or
+re-importing them there. They only call the Gradle tasks above.
 
 | Name | Command | Icon | Option |
 | --- | --- | --- | --- |
-| Launch Minecraft | `./gradlew runDevClient; if ($LASTEXITCODE -eq 0) { exit }` | play | |
+| Launch Minecraft | `./gradlew runDevClient && exit` | play | |
 | Reload Minecraft | `./gradlew devReload` | build | |
-| Stop Minecraft | `./gradlew devStop pruneBranches --continue` | debug | **Run in the thread's worktree when the thread settles** |
+| Stop & Clean Up | `./gradlew devStop pruneBranches --continue` | debug | **Run in the thread's worktree when the thread settles** |
 
-On macOS and Linux, use `./gradlew runDevClient && exit` for **Launch Minecraft**. The `exit` closes the game's
-terminal when the game exits normally, because an open terminal keeps T3 Code from cleaning up a worktree. If the
-build fails or the game crashes, the terminal stays open so you can read the error. When a worktree's thread settles,
-**Stop Minecraft** closes that worktree's game; T3 Code skips settle scripts on the main checkout. T3 Code runs only
-the first script marked to run on settle, so **Stop Minecraft** also runs `pruneBranches`.
+The commands work in the shells T3 Code's terminals use: bash or zsh on macOS and Linux, and PowerShell 7 on
+Windows. Install PowerShell 7 on Windows (`winget install Microsoft.PowerShell`); without it, T3 Code falls back to
+Windows PowerShell 5.1, which can't run `&&`. The `exit` closes the game's terminal when the game exits normally,
+because an open terminal keeps T3 Code from cleaning up a worktree. If the build fails or the game crashes, the
+terminal stays open so you can read the error. When a worktree's thread settles, **Stop & Clean Up**
+closes that worktree's game; T3 Code skips settle scripts on the main checkout. T3 Code runs only the first script
+marked to run on settle, so **Stop & Clean Up** also runs `pruneBranches`.
+
+`t3.json` also makes new threads start in a worktree, since each worktree gets its own game and test world. A
+project or machine setting in T3 Code overrides it.
 
 Agents run `devReload` at the end of each turn that changes `src/`, so **Reload Minecraft** is a manual fallback. It
 replaces both F3+T and `/reload`.
@@ -51,7 +58,7 @@ replaces both F3+T and `/reload`.
 ### Merged branches
 
 GitHub deletes a PR's branch when it merges, and T3 Code removes a settled thread's worktree, but nothing deletes the
-local branch. `./gradlew pruneBranches` does, and **Stop Minecraft** runs it whenever a thread settles. A thread's own
+local branch. `./gradlew pruneBranches` does, and **Stop & Clean Up** runs it whenever a thread settles. A thread's own
 branch is still checked out at that moment, so it goes at the next settle.
 
 It deletes a branch only when nothing on it can be lost: no worktree has it checked out, and its last commit is

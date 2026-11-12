@@ -1,0 +1,22 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "defaultThreadEnvMode": "worktree",
+  "scripts": [
+    {
+      "name": "Launch Minecraft",
+      "command": "./gradlew runDevClient && exit",
+      "icon": "play"
+    },
+    {
+      "name": "Reload Minecraft",
+      "command": "./gradlew devReload",
+      "icon": "build"
+    },
+    {
+      "name": "Stop & Clean Up",
+      "command": "./gradlew devStop pruneBranches --continue",
+      "icon": "debug",
+      "runOnSettle": true
+    }
+  ]
+}
