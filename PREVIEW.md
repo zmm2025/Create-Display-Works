@@ -1,6 +1,4 @@
-Eleven new display blocks. They're all new, so there are no before images.
-
-![The display wall: indicator lights, a counter, gauges, segment displays, bar gauges and chart recorders](display-wall.png)
+Twelve new display blocks and a Hand Tally. They're all new, so there are no before images.
 
 ### Pixel Matrix Display
 
@@ -8,9 +6,9 @@ Eleven new display blocks. They're all new, so there are no before images.
 
 ### Analog Gauge
 
-![Three gauges, with one-width needles and four small ticks to a large one](analog-gauge-after.png)
+![Gauges with a wooden rim, two pixels deep, with dyed and undyed dials](analog-gauge-wood-rim.png)
 
-![Setting the full scale with a wrench](analog-gauge-scale-board.png)
+![A chest's fill level on a gauge, through a Threshold Switch and a Display Link](ux-chest-to-gauge.png)
 
 ### Bar Gauge
 
@@ -36,11 +34,9 @@ Eleven new display blocks. They're all new, so there are no before images.
 
 ![The displays from the side](split-flap-close.png)
 
-### Segment Display
+### Andesite and Brass Segment Displays
 
-| Day | Night |
-| --- | --- |
-| ![A time, a number and a word in three colors](segment-display-day.png) | ![The same displays glowing in the dark](segment-display-night.png) |
+![Two andesite rows showing a time and a number above a brass row spelling OPEN](segment-displays-framed.png)
 
 ### Indicator Light and Pilot Light
 
@@ -52,12 +48,14 @@ Eleven new display blocks. They're all new, so there are no before images.
 
 ### Hologram Projector
 
-| Day | Night |
-| --- | --- |
-| ![Text floating over floor, wall and ceiling projectors](hologram-projector-day.png) | ![The same holograms at night](hologram-projector-night.png) |
+![A slab-high brass projector whose ring of light matches its text](hologram-projector-slab.png)
 
 ### Projector
 
 | Day | Night |
 | --- | --- |
 | ![Two projectors throwing text on a wall](projector-day.png) | ![The same pictures at night, the further projector's larger](projector-night.png) |
+
+### Hand Tally
+
+![The tally on the hotbar, showing a count of 4](hand-tally-hotbar.png)
