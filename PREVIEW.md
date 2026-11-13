@@ -36,6 +36,8 @@ Twelve new display blocks, a Hand Tally, and two additions to Create's Display L
 
 ![A recorder on its motor](chart-recorder-close.png)
 
+![Recorders dyed white, yellow and light gray: light dyes draw in a darker ink, so they show on the paper](chart-recorder-light-inks.png)
+
 ### Split-Flap Display
 
 ![Two lines flipping from DEPART to ARRIVING](split-flap-flipping.gif)
