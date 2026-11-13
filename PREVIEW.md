@@ -1,4 +1,12 @@
-Twelve new display blocks and a Hand Tally. They're all new, so there are no before images.
+Twelve new display blocks, a Hand Tally, and two additions to Create's Display Link. They're all new, so there are no before images.
+
+### Display Links
+
+![With a link in hand, the displays clicked after its target are outlined too](link-displays-selected.png)
+
+![One link on a Lectern writing the open page to a segment display, a bar gauge and a gauge](link-three-displays.png)
+
+![The link's screen, reading the Lectern's open page](link-lectern-source.png)
 
 ### Pixel Matrix Display
 
@@ -6,9 +14,9 @@ Twelve new display blocks and a Hand Tally. They're all new, so there are no bef
 
 ### Analog Gauge
 
-![Gauges with a wooden rim, two pixels deep, with dyed and undyed dials](analog-gauge-wood-rim.png)
+![Gauges with different full scales, tick counts and dyes; the needle is black on light dials and white on dark ones](analog-gauge-ticks.png)
 
-![A chest's fill level on a gauge, through a Threshold Switch and a Display Link](ux-chest-to-gauge.png)
+![A wrench shows the gauge's three settings: full scale, major ticks and minor ticks](analog-gauge-tick-boxes.png)
 
 ### Bar Gauge
 
@@ -36,7 +44,7 @@ Twelve new display blocks and a Hand Tally. They're all new, so there are no bef
 
 ### Andesite and Brass Segment Displays
 
-![Two andesite rows showing a time and a number above a brass row spelling OPEN](segment-displays-framed.png)
+![Two andesite rows showing a time and a number above a brass row spelling OPEN](segment-displays-brass-rim.png)
 
 ### Indicator Light and Pilot Light
 
@@ -48,7 +56,7 @@ Twelve new display blocks and a Hand Tally. They're all new, so there are no bef
 
 ### Hologram Projector
 
-![A slab-high brass projector whose ring of light matches its text](hologram-projector-slab.png)
+![A slab-high brass casing with its emitter sunk into the top and a ring of light in the text's color](hologram-projector-recessed.png)
 
 ### Projector
 
@@ -58,4 +66,4 @@ Twelve new display blocks and a Hand Tally. They're all new, so there are no bef
 
 ### Hand Tally
 
-![The tally on the hotbar, showing a count of 4](hand-tally-hotbar.png)
+![The tally on the hotbar](hand-tally-no-count.png)
